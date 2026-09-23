@@ -1,0 +1,19 @@
+# Runtime generated files
+logs/
+.token
+rebind-status.json
+refresh-status.json
+partition-refresh-status.json
+_rebind-worker.ps1
+_worker.ps1
+*-worker-errors.log
+
+# Local profile data: may contain workspace IDs, PBIP paths, and recipient addresses
+profiles.json
+rebind-profiles.json
+partition-refresh-profiles.json
+
+# Keep local environment configuration out of source control
+.env
+.env.*
+!.env.example

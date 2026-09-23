@@ -1,0 +1,2262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Power BI Dashboard Control Panel</title>
+<link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
+<link rel="shortcut icon" href="favicon.ico">
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #242836;
+    --border: #2d3245;
+    --text: #e4e6ed;
+    --text2: #8b90a0;
+    --accent: #6c8cff;
+    --accent-glow: rgba(108,140,255,0.25);
+    --accent2: #a78bfa;
+    --accent2-glow: rgba(167,139,250,0.25);
+    --green: #4ade80;
+    --red: #f87171;
+    --yellow: #fbbf24;
+    --radius: 10px;
+    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--font);
+    height: 100vh; display: flex; overflow: hidden;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 320px; background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; flex-shrink: 0;
+  }
+  .sidebar-header {
+    padding: 24px 20px 16px; border-bottom: 1px solid var(--border);
+  }
+  .sidebar-header h1 {
+    font-size: 18px; font-weight: 700; letter-spacing: -0.3px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+  }
+  .sidebar-header p { font-size: 12px; color: var(--text2); margin-top: 4px; }
+
+  /* Tab toggle pills */
+  .tab-toggle {
+    display: flex; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+  .tab-pill {
+    flex: 1; padding: 8px 0; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text2); cursor: pointer;
+    font-size: 13px; font-weight: 600; text-align: center;
+    transition: all 0.2s;
+  }
+  .tab-pill:hover { border-color: var(--accent); color: var(--text); }
+  .tab-pill.active {
+    border-color: var(--accent); background: rgba(108,140,255,0.12); color: var(--text);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+  }
+  .tab-pill.rebind.active {
+    border-color: var(--accent2); background: rgba(167,139,250,0.12);
+    box-shadow: 0 0 0 2px var(--accent2-glow);
+  }
+  .tab-pill.partition.active {
+    border-color: var(--green); background: rgba(74,222,128,0.10); color: var(--text);
+    box-shadow: 0 0 0 2px rgba(74,222,128,0.20);
+  }
+  .tab-pill .pill-icon { font-size: 15px; margin-right: 4px; vertical-align: -1px; }
+
+  .profile-list {
+    flex: 1; overflow-y: auto; padding: 12px;
+  }
+  .profile-card {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 14px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s;
+  }
+  .profile-card:hover { border-color: var(--accent); background: #262b3a; }
+  .profile-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
+  .profile-card .name { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
+  .profile-card .ids { font-size: 11px; color: var(--text2); font-family: 'SF Mono', 'Consolas', monospace; }
+  .profile-card .ids span { display: block; overflow: hidden; text-overflow: ellipsis; }
+
+  .sidebar-actions { padding: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
+  .sidebar-actions button {
+    flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--surface2); color: var(--text); cursor: pointer; font-size: 13px; font-weight: 500;
+    transition: all 0.15s;
+  }
+  .sidebar-actions button:hover { border-color: var(--accent); }
+  .sidebar-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .sidebar-actions button.primary:hover { filter: brightness(1.1); }
+  .sidebar-actions button.danger { color: var(--red); }
+  .sidebar-actions button.danger:hover { border-color: var(--red); background: rgba(248,113,113,0.1); }
+
+  .sidebar-rebind-info {
+    flex: 1; padding: 20px; color: var(--text2); font-size: 13px; line-height: 1.6;
+    overflow-y: auto;
+  }
+  .sidebar-rebind-info h4 { color: var(--accent2); font-size: 13px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .sidebar-rebind-info p { margin-bottom: 10px; }
+  .sidebar-rebind-info code { background: var(--surface2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+
+  /* Main */
+  .main {
+    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .main-header {
+    padding: 24px 32px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .main-header h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.3px; }
+  .main-header.rebind h2 { color: var(--accent2); }
+  .status-badge {
+    padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    background: var(--surface2); border: 1px solid var(--border);
+    transition: all 0.2s;
+  }
+  .status-badge.running { background: rgba(108,140,255,0.15); border-color: var(--accent); color: var(--accent); }
+  .status-badge.done { background: rgba(74,222,128,0.15); border-color: var(--green); color: var(--green); }
+  .status-badge.failed { background: rgba(248,113,113,0.15); border-color: var(--red); color: var(--red); }
+
+  /* Auth banner */
+  .auth-banner {
+    padding: 12px 32px; background: rgba(248,113,113,0.1); border-bottom: 1px solid var(--red);
+    color: var(--red); font-size: 13px; align-items: center; gap: 16px;
+  }
+  .auth-banner button {
+    margin-left: auto; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--red);
+    background: transparent; color: var(--red); cursor: pointer; font-weight: 600;
+  }
+  .auth-banner button:hover { background: rgba(248,113,113,0.12); }
+  .auth-banner button:disabled { opacity: 0.55; cursor: wait; }
+
+  /* Form */
+  .form-area {
+    padding: 24px 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group.full { grid-column: 1 / -1; }
+  .form-group label { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
+  .form-group input {
+    padding: 10px 14px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); font-size: 13px;
+    font-family: 'SF Mono','Consolas',monospace;
+    transition: border-color 0.15s;
+  }
+  .form-group input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .form-group input.invalid { border-color: var(--red); box-shadow: 0 0 0 3px rgba(248,113,113,0.2); }
+  .form-group input.valid { border-color: var(--green); }
+  .form-group textarea {
+    min-height: 104px; resize: vertical; padding: 10px 14px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);
+    font-size: 13px; font-family: 'SF Mono','Consolas',monospace;
+  }
+  .form-group textarea:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(74,222,128,0.15); }
+  .partition-state { padding: 12px 32px; border-bottom: 1px solid var(--border); color: var(--text2); font-size: 12px; line-height: 1.55; }
+  .partition-state strong { color: var(--text); }
+  .form-group .field-error { font-size: 11px; color: var(--red); min-height: 15px; }
+  .form-group select {
+    padding: 10px 14px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); font-size: 13px;
+    font-family: var(--font); transition: border-color 0.15s; cursor: pointer;
+  }
+  .form-group select:focus { outline: none; border-color: var(--accent2); box-shadow: 0 0 0 3px var(--accent2-glow); }
+
+  /* Mapping rows */
+  .mapping-row {
+    display: grid; grid-template-columns: 120px 1fr 28px 1fr 36px; gap: 8px;
+    align-items: start; padding: 12px; background: var(--surface2);
+    border: 1px solid var(--border); border-radius: var(--radius);
+    margin-bottom: 8px; transition: all 0.15s;
+  }
+  .mapping-row:hover { border-color: var(--accent2); }
+  .mapping-row .form-group { gap: 4px; }
+  .mapping-row .form-group label { font-size: 10px; }
+  .mapping-row .form-group input { font-size: 12px; padding: 8px 10px; }
+  .mapping-row .form-group select { font-size: 12px; padding: 8px 10px; }
+  .btn-row-remove {
+    width: 36px; height: 36px; align-self: center; margin-top: 16px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--surface); color: var(--red); cursor: pointer;
+    font-size: 16px; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .btn-row-remove:hover { border-color: var(--red); background: rgba(248,113,113,0.1); }
+  .btn-row-swap {
+    width: 28px; height: 28px; align-self: center; margin-top: 16px;
+    border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface); color: var(--accent2); cursor: pointer;
+    font-size: 14px; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s; padding: 0;
+  }
+  .btn-row-swap:hover { border-color: var(--accent2); background: rgba(167,139,250,0.12); }
+
+  .btn-add-mapping {
+    padding: 10px 18px; border: 1px dashed var(--border); border-radius: var(--radius);
+    background: transparent; color: var(--accent2); cursor: pointer;
+    font-size: 13px; font-weight: 500; transition: all 0.15s;
+    width: 100%; text-align: center;
+  }
+  .btn-add-mapping:hover { border-color: var(--accent2); background: rgba(167,139,250,0.06); }
+
+  /* Dataflow rows */
+  .df-row {
+    display: flex; gap: 8px; align-items: center; margin-bottom: 6px;
+  }
+  .df-row input {
+    flex: 1; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); font-size: 12px;
+    font-family: 'SF Mono','Consolas',monospace;
+    transition: border-color 0.15s;
+  }
+  .df-row input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .df-row .btn-row-remove {
+    width: 30px; height: 30px; margin-top: 0; flex-shrink: 0;
+  }
+  .semantic-row {
+    display: grid; grid-template-columns: 1fr 1fr 30px; gap: 8px; align-items: center; margin-bottom: 6px;
+  }
+  .semantic-row input {
+    min-width: 0; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: var(--radius); color: var(--text); font-size: 12px;
+    font-family: 'SF Mono','Consolas',monospace; transition: border-color 0.15s;
+  }
+  .semantic-row input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+  .semantic-row .btn-row-remove { width: 30px; height: 30px; margin-top: 0; }
+  .check-row { display:flex; align-items:center; gap:8px; color:var(--text2); font-size:13px; }
+  .check-row input { width:auto; padding:0; accent-color:var(--accent); }
+  .refresh-item-status { padding: 0 32px 12px; border-bottom: 1px solid var(--border); }
+  .refresh-item-status:empty { display:none; }
+  .item-status-row { display:flex; align-items:center; gap:8px; padding:5px 0; color:var(--text2); font-size:12px; }
+  .item-status-row .dot { width:8px; height:8px; border-radius:50%; background:var(--border); flex:none; }
+  .item-status-row .dot.active { background:var(--accent); box-shadow:0 0 6px var(--accent); }
+  .item-status-row .dot.done { background:var(--green); }
+  .item-status-row .dot.failed { background:var(--red); }
+  .email-warning { display:none; margin:12px 32px 0; padding:10px 12px; border:1px solid var(--yellow); border-radius:var(--radius); color:var(--yellow); background:rgba(251,191,36,0.08); font-size:12px; }
+
+  /* Folder picker */
+  .folder-picker {
+    display: flex; gap: 10px; align-items: center;
+  }
+  .folder-picker input { flex: 1; }
+  .btn-browse {
+    padding: 10px 18px; border: 1px solid var(--accent2); border-radius: var(--radius);
+    background: transparent; color: var(--accent2); cursor: pointer;
+    font-size: 13px; font-weight: 500; transition: all 0.15s; white-space: nowrap;
+  }
+  .btn-browse:hover { background: rgba(167,139,250,0.1); }
+
+  /* Controls */
+  .controls {
+    padding: 16px 32px; border-bottom: 1px solid var(--border);
+    display: flex; gap: 12px; align-items: center;
+  }
+  .btn {
+    padding: 10px 24px; border: none; border-radius: var(--radius); font-size: 14px;
+    font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: var(--font);
+  }
+  .btn-start {
+    background: linear-gradient(135deg, var(--accent), #5b7aee);
+    color: #fff; box-shadow: 0 4px 14px var(--accent-glow);
+  }
+  .btn-start:hover { transform: translateY(-1px); box-shadow: 0 6px 20px var(--accent-glow); }
+  .btn-start:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  .btn-rebind {
+    background: linear-gradient(135deg, var(--accent2), #8b5cf6);
+    color: #fff; box-shadow: 0 4px 14px var(--accent2-glow);
+  }
+  .btn-rebind:hover { transform: translateY(-1px); box-shadow: 0 6px 20px var(--accent2-glow); }
+  .btn-rebind:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+
+  .btn-save { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-save:hover { border-color: var(--accent); }
+  .btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .progress-row {
+    display: flex; gap: 24px; margin-left: 16px;
+  }
+  .progress-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); }
+  .progress-step .dot {
+    width: 10px; height: 10px; border-radius: 50%; background: var(--border);
+    transition: all 0.3s;
+  }
+  .progress-step .dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+  .progress-step .dot.done { background: var(--green); box-shadow: 0 0 8px var(--green); }
+  .progress-step .dot.failed { background: var(--red); }
+  .progress-step.rebind-step .dot.active { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+
+  /* Logs */
+  .logs {
+    flex: 1; overflow-y: auto; padding: 16px 32px;
+    background: var(--bg); font-family: 'SF Mono','Consolas','Cascadia Code',monospace;
+    font-size: 13px; line-height: 1.7;
+  }
+  .rebind-output {
+    flex: 1; min-height: 0; overflow-y: auto;
+  }
+  #logsRebind {
+    height: 240px; min-height: 120px; flex: none;
+  }
+  .rebind-log-resize-handle {
+    flex: 0 0 10px; position: relative; cursor: ns-resize; touch-action: none;
+  }
+  .rebind-log-resize-handle::before {
+    content: ''; position: absolute; left: 32px; right: 32px; top: 4px;
+    height: 2px; border-radius: 2px; background: var(--border); transition: background 0.15s;
+  }
+  .rebind-log-resize-handle:hover::before,
+  .rebind-log-resize-handle.dragging::before { background: var(--accent2); }
+  .log-entry { display: flex; gap: 12px; padding: 2px 0; }
+  .log-time { color: var(--text2); white-space: nowrap; }
+  .log-text { color: var(--text); }
+  .log-text.success { color: var(--green); }
+  .log-text.error { color: var(--red); }
+  .log-text.warn { color: var(--yellow); }
+  .log-text.highlight { color: var(--accent2); }
+
+  /* Plain-language result card (kept separate from the technical log) */
+  .rebind-summary {
+    display: none; margin: 6px 32px 18px; padding: 18px 20px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+  }
+  .rebind-summary.visible { display: block; }
+  .rebind-summary.ready { border-color: var(--accent2); }
+  .rebind-summary.success { border-color: var(--green); }
+  .rebind-summary.warning { border-color: var(--yellow); }
+  .rebind-summary.failed { border-color: var(--red); }
+  .rebind-summary-header { display: flex; gap: 12px; align-items: flex-start; }
+  .rebind-summary-icon { font-size: 22px; line-height: 1; }
+  .rebind-summary h3 { font-size: 16px; margin-bottom: 4px; }
+  .rebind-summary-message { color: var(--text2); font-size: 13px; line-height: 1.5; }
+  .rebind-summary-stats {
+    display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 8px;
+    margin-top: 14px;
+  }
+  .rebind-summary-stat { padding: 10px 12px; background: var(--surface2); border-radius: 8px; }
+  .rebind-summary-stat strong { display: block; font-size: 17px; color: var(--text); }
+  .rebind-summary-stat span { color: var(--text2); font-size: 11px; }
+  .rebind-summary-details { margin-top: 12px; color: var(--text2); font-size: 12px; line-height: 1.6; }
+  .rebind-summary-actions { display: flex; gap: 8px; margin-top: 14px; }
+  .rebind-summary-actions button { padding: 9px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+  .rebind-summary-actions .continue { background: var(--accent2); border: 1px solid var(--accent2); color: white; }
+  .rebind-summary-actions .stop { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .rebind-summary-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    height: 100%; color: var(--text2); gap: 12px;
+  }
+  .empty-state svg { opacity: 0.3; }
+
+  /* MODAL */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 28px; width: 480px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  }
+  .modal h3 { font-size: 18px; margin-bottom: 20px; }
+  .modal .form-group { margin-bottom: 14px; }
+  .modal .btn-row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+  .modal .warn-text { color: var(--yellow); font-size: 13px; margin-bottom: 12px; line-height: 1.5; }
+  .modal .summary-stats { font-size: 13px; color: var(--text2); margin-bottom: 16px; line-height: 1.6; }
+  .modal .summary-stats strong { color: var(--text); }
+
+  /* Help button */
+  .btn-help {
+    width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text2); cursor: pointer;
+    font-size: 14px; font-weight: 700; font-family: var(--font);
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .btn-help:hover { border-color: var(--accent); color: var(--text); background: #2d3345; }
+
+  /* Version pill (bottom-right corner) */
+  .version-pill {
+    position: fixed; bottom: 14px; right: 20px; z-index: 50;
+    padding: 5px 12px; border-radius: 14px;
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text2); font-size: 11px; font-family: var(--font);
+    cursor: pointer; transition: all 0.2s;
+    user-select: none;
+  }
+  .version-pill:hover { border-color: var(--accent2); color: var(--accent2); }
+
+  /* Modal wider variant for help content */
+  .modal-wide { width: 620px; max-width: 92vw; max-height: 80vh; overflow-y: auto; }
+  .modal-wide h4 { color: var(--accent); font-size: 14px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+  .modal-wide h4:first-child { margin-top: 0; }
+  .modal-wide p, .modal-wide li { font-size: 13px; color: var(--text2); line-height: 1.7; margin-bottom: 6px; }
+  .modal-wide ul { padding-left: 18px; margin-bottom: 10px; }
+  .modal-wide code { background: var(--surface2); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
+  .modal-wide .changelog-entry { margin-bottom: 10px; padding: 10px 14px; background: var(--surface2); border-radius: 8px; border: 1px solid var(--border); }
+  .modal-wide .changelog-entry .ver { font-weight: 700; color: var(--accent2); font-size: 13px; }
+  .modal-wide .changelog-entry .date { font-size: 11px; color: var(--text2); margin-left: 8px; }
+  .modal-wide .changelog-entry ul { margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <h1>Power BI Dashboard Control Panel</h1>
+    <p id="sidebarSubtitle">Chained dataflow(s) → semantic model(s)</p>
+  </div>
+
+  <!-- Tab toggle -->
+  <div class="tab-toggle">
+    <button class="tab-pill active" id="pillRefresh" onclick="switchTab('refresh')">
+      <span class="pill-icon">&#x21BB;</span> Refresh
+    </button>
+    <button class="tab-pill partition" id="pillPartitionRefresh" onclick="switchTab('partition-refresh')">
+      <span class="pill-icon">&#x25F4;</span> Partition
+    </button>
+    <button class="tab-pill rebind" id="pillRebind" onclick="switchTab('rebind')">
+      <span class="pill-icon">&#x1F517;</span> Rebind
+    </button>
+  </div>
+
+  <!-- Refresh mode: profile list -->
+  <div class="profile-list" id="profileList"></div>
+
+  <div class="profile-list" id="partitionRefreshProfileList" style="display:none;"></div>
+
+  <!-- Rebind mode: profile list -->
+  <div class="profile-list" id="rebindProfileList" style="display:none;"></div>
+
+  <!-- Rebind mode: info panel -->
+  <div class="sidebar-rebind-info" id="rebindInfo" style="display:none;">
+    <h4>PBIP Rebind</h4>
+    <p>Replace workspace, dataflow, and dataset GUIDs across all <code>.tmdl</code> and <code>.json</code> files in a local PBIP report folder.</p>
+    <p><strong>Workflow:</strong></p>
+    <p>1. Enter your old→new GUID mappings<br>
+       2. Click <strong>Scan</strong> — sees what would change<br>
+       3. Review the summary and choose whether to continue with <strong>Apply</strong></p>
+    <p style="margin-top:12px;padding:10px;background:rgba(248,113,113,0.08);border-radius:6px;border:1px solid rgba(248,113,113,0.2);">
+      Changes are applied in-place. Ensure the project is under version control.
+    </p>
+  </div>
+
+  <div class="sidebar-actions" id="sidebarActions">
+    <button class="primary" onclick="openNewProfile()">+ New</button>
+    <button class="danger" onclick="deleteProfile()" id="btnDelete" disabled>Delete</button>
+  </div>
+
+  <div class="sidebar-actions" id="partitionRefreshSidebarActions" style="display:none;">
+    <button class="primary" onclick="newPartitionRefreshProfile()">+ New</button>
+    <button class="danger" onclick="deletePartitionRefreshProfile()" id="btnDeletePartitionRefresh" disabled>Delete</button>
+  </div>
+
+  <div class="sidebar-actions" id="rebindSidebarActions" style="display:none;">
+    <button class="primary" onclick="openNewRebindProfile()">+ New</button>
+    <button class="danger" onclick="deleteRebindProfile()" id="btnDeleteRebind" disabled>Delete</button>
+  </div>
+</aside>
+
+<!-- Main -->
+<main class="main">
+  <div class="main-header" id="mainHeader">
+    <h2 id="pageTitle">Select or create a profile</h2>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <span class="status-badge" id="authBadge" style="font-size:11px;">Checking...</span>
+      <span class="status-badge" id="statusBadge">Idle</span>
+      <button class="btn-help" onclick="openHelp()" title="Справка">?</button>
+    </div>
+  </div>
+
+  <div class="auth-banner" id="authBanner" style="display:none;">
+    <span id="authMessage">&#x26A0; Refresh and Partition Refresh require authentication. Rebind does not.</span>
+    <button id="btnAuth" onclick="authenticateRefresh()">Authenticate for Refresh</button>
+  </div>
+
+  <!-- Refresh mode form -->
+  <div class="form-area" id="formRefresh">
+    <div class="form-group full">
+      <label>Profile name</label>
+      <input type="text" id="profileName" placeholder="e.g., My Profile">
+    </div>
+    <div class="form-group full">
+      <label>Workspace ID</label>
+      <input type="text" id="workspaceId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+    </div>
+    <div class="form-group full">
+      <label>Dataflow IDs</label>
+      <div id="dfList"></div>
+      <button class="btn-add-mapping" onclick="addDataflow()" style="margin-top:6px;">+ Add Dataflow</button>
+    </div>
+    <div class="form-group full">
+      <label>Semantic models</label>
+      <div id="semanticModelList"></div>
+      <button class="btn-add-mapping" onclick="addSemanticModel()" style="margin-top:6px;">+ Add Semantic Model</button>
+    </div>
+    <div class="form-group full">
+      <label>Notify colleagues</label>
+      <input type="text" id="notifyEmails" placeholder="colleague@example.com; teammate@example.com" oninput="validateNotifyEmails(false)">
+      <span class="field-error" id="notifyEmailsError"></span>
+      <label class="check-row" style="text-transform:none;letter-spacing:0;font-weight:400;">
+        <input type="checkbox" id="emailDryRun"> Dry run: preview notification in the log without sending
+      </label>
+    </div>
+  </div>
+
+  <div class="form-area" id="formPartitionRefresh" style="display:none;">
+    <div class="form-group full">
+      <label>Profile name</label>
+      <input type="text" id="partitionProfileName" placeholder="e.g., Historical sales partitions">
+    </div>
+    <div class="form-group">
+      <label>Workspace ID</label>
+      <input type="text" id="partitionWorkspaceId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+    </div>
+    <div class="form-group">
+      <label>Semantic model / Dataset ID</label>
+      <input type="text" id="partitionDatasetId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
+    </div>
+    <div class="form-group full">
+      <label>Exact table name</label>
+      <input type="text" id="partitionTableName" placeholder="Exact model table name">
+    </div>
+    <div class="form-group full">
+      <label>Exact partition names (one per line)</label>
+      <textarea id="partitionNames" placeholder="2022&#10;2023&#10;2024"></textarea>
+      <span class="field-error">Names are sent exactly as entered. Blank and duplicate lines are rejected.</span>
+    </div>
+  </div>
+
+  <!-- Rebind mode form -->
+  <div class="form-area" id="formRebind" style="display:none;">
+    <div class="form-group full">
+      <label>Profile name</label>
+      <input type="text" id="rebindProfileName" placeholder="e.g., MyProject dev → test">
+    </div>
+    <div class="form-group full">
+      <label>Report folder path</label>
+      <div class="folder-picker">
+        <input type="text" id="reportPath" placeholder="C:\Projects\MyProject" style="flex:1;" oninput="onPathChange()">
+      </div>
+      <span class="field-error" id="pathError"></span>
+    </div>
+
+    <div class="form-group full">
+      <label>ID Mappings</label>
+      <div id="mappingList"></div>
+      <button class="btn-add-mapping" onclick="addMapping()">+ Add Mapping</button>
+    </div>
+  </div>
+
+  <!-- Refresh controls -->
+  <div class="controls" id="controlsRefresh">
+    <button class="btn btn-start" id="btnStart" onclick="startRefresh()" disabled>Start Refresh</button>
+    <button class="btn btn-save" onclick="saveProfile()">Save Profile</button>
+    <div class="progress-row" id="progressRow">
+      <div class="progress-step">
+        <span class="dot" id="dotDataflow"></span> Dataflow
+      </div>
+      <div class="progress-step">
+        <span class="dot" id="dotDataset"></span> Semantic models
+      </div>
+    </div>
+  </div>
+  <div class="email-warning" id="emailWarning"></div>
+  <div class="refresh-item-status" id="semanticStatusList"></div>
+
+  <div class="controls" id="controlsPartitionRefresh" style="display:none;">
+    <button class="btn btn-start" id="btnStartPartitionRefresh" onclick="startPartitionRefresh()">Start Partition Refresh</button>
+    <button class="btn btn-save" onclick="savePartitionRefreshProfile()">Save Profile</button>
+    <button class="btn btn-save" onclick="loadPartitionRefreshHistory()">Refresh History</button>
+  </div>
+
+  <div class="partition-state" id="partitionRefreshState" style="display:none;">
+    No partition refresh request has been loaded. Status checks use GET and never resubmit.
+  </div>
+
+  <!-- Rebind controls -->
+  <div class="controls" id="controlsRebind" style="display:none;">
+    <button class="btn btn-rebind" id="btnScan" onclick="startScan()" disabled>Scan</button>
+    <button class="btn btn-rebind" id="btnApply" onclick="startApply()" disabled>Apply</button>
+    <button class="btn btn-save" onclick="saveRebindProfile()">Save Profile</button>
+    <div class="progress-row">
+      <div class="progress-step rebind-step">
+        <span class="dot" id="dotScan"></span> Scan
+      </div>
+      <div class="progress-step rebind-step">
+        <span class="dot" id="dotReplace"></span> Replace
+      </div>
+      <div class="progress-step rebind-step">
+        <span class="dot" id="dotVerify"></span> Verify
+      </div>
+    </div>
+  </div>
+
+  <!-- Log panel: Refresh -->
+  <div class="logs" id="logsRefresh">
+    <div class="empty-state">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+      <span>Log output will appear here</span>
+    </div>
+  </div>
+  <div class="logs" id="logsPartitionRefresh" style="display:none;">
+    <div class="empty-state"><span>Partition refresh status and history will appear here</span></div>
+  </div>
+  <!-- Log panel: Rebind -->
+  <div class="rebind-output" id="rebindOutput" style="display:none;">
+    <div class="logs" id="logsRebind">
+      <div class="empty-state">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
+        <span>Log output will appear here</span>
+      </div>
+    </div>
+    <div class="rebind-log-resize-handle" id="rebindLogResizeHandle" role="separator" aria-orientation="horizontal" aria-label="Resize Rebind log"></div>
+    <section class="rebind-summary" id="rebindSummary" aria-live="polite">
+      <div class="rebind-summary-header">
+        <div class="rebind-summary-icon" id="rebindSummaryIcon"></div>
+        <div>
+          <h3 id="rebindSummaryTitle"></h3>
+          <div class="rebind-summary-message" id="rebindSummaryMessage"></div>
+        </div>
+      </div>
+      <div class="rebind-summary-stats" id="rebindSummaryStats"></div>
+      <div class="rebind-summary-details" id="rebindSummaryDetails"></div>
+      <div class="rebind-summary-actions">
+        <button class="continue" id="btnSummaryApply" onclick="startApply()">Continue with Apply</button>
+        <button class="stop" id="btnSummaryStop" onclick="declineRebind()">Do not continue</button>
+        <button class="stop" id="btnSummaryReset" onclick="resetRebindWorkflow()" style="display:none;">Run another scan</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<!-- Version pill (bottom-right) -->
+<div class="version-pill" onclick="openVersion()" title="Версии и изменения">v0.5.0</div>
+
+<!-- Version / Changelog Modal -->
+<div class="modal-overlay" id="modalVersion">
+  <div class="modal modal-wide">
+    <h3>📋 Версии и изменения</h3>
+    <div class="changelog-entry">
+      <span class="ver">v0.5.0</span><span class="date">21 сентября 2026</span>
+      <ul>
+        <li>Refresh поддерживает несколько семантических моделей с отдельным статусом каждой</li>
+        <li>Добавлены итоговые email-уведомления через Power Automate и безопасный dry run</li>
+      </ul>
+    </div>
+    <div class="changelog-entry">
+      <span class="ver">v0.4.0</span><span class="date">4 августа 2026</span>
+      <ul>
+        <li>Добавлена независимая вкладка Partition Refresh для Enhanced Refresh точных исторических партиций</li>
+        <li>Статус принятого запроса и история проверяются без повторной отправки</li>
+      </ul>
+    </div>
+    <div class="changelog-entry">
+      <span class="ver">v0.3.0</span><span class="date">14 июля 2026</span>
+      <ul>
+        <li>Rebind и браузер запускаются без входа; аутентификация требуется только для Refresh</li>
+        <li>После Scan и Apply показывается понятное резюме с явным выбором продолжить или остановиться</li>
+        <li>Добавлена защита от применения изменённых после Scan параметров и параллельных запусков</li>
+      </ul>
+    </div>
+    <div class="changelog-entry">
+      <span class="ver">v0.2.0</span><span class="date">22 июня 2026</span>
+      <ul>
+        <li>Раздельные логи для вкладок Refresh и Rebind — каждая вкладка ведёт свой журнал</li>
+        <li>Исправлено зависание логов при переключении между вкладками во время выполнения задач</li>
+        <li>Добавлена кнопка справки (<strong>?</strong>) и окно версий (это окно)</li>
+        <li>Справка и описание версий на русском языке</li>
+      </ul>
+    </div>
+    <div class="changelog-entry">
+      <span class="ver">v0.1.0</span><span class="date">май 2026</span>
+      <ul>
+        <li>Первая версия панели управления</li>
+        <li><strong>Refresh</strong> — цепочка обновлений Dataflow → Semantic models через Power BI REST API</li>
+        <li>Аутентификация через MSAL.PS (Device Code)</li>
+      </ul>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-save" onclick="closeModal('modalVersion')">Закрыть</button>
+    </div>
+    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);text-align:center;font-size:12px;color:var(--text2);">
+      &copy; 2026 Alex Paraschakis
+    </div>
+  </div>
+</div>
+
+<!-- Help Modal -->
+<div class="modal-overlay" id="modalHelp">
+  <div class="modal modal-wide">
+    <h3>❓ Справка</h3>
+    <h4>Что это такое</h4>
+    <p>Панель управления для двух независимых операций с Power BI / Fabric:</p>
+    <ul>
+      <li><strong>Refresh</strong> — обновление нескольких Dataflow, затем нескольких семантических моделей через Power BI REST API. Модели запускаются только после успешного завершения всех dataflow.</li>
+      <li><strong>Rebind</strong> — замена GUID рабочих областей и dataflow в исходном коде PBIP-проекта. Сканирует <code>.tmdl</code> файлы семантической модели, находит старые GUID, заменяет на новые, и проверяет результат.</li>
+    </ul>
+
+    <h4>Вкладка Refresh</h4>
+    <p><strong>Как работает цепочка Refresh:</strong></p>
+    <ul>
+      <li>Запуск всех dataflow одновременно</li>
+      <li>Ожидание завершения всех (проверка каждые 30 секунд)</li>
+      <li>После успешного завершения всех dataflow — параллельный запуск всех семантических моделей</li>
+      <li>Каждая модель показывает собственный статус; ошибка одной не отменяет остальные</li>
+      <li>Если заполнено Notify colleagues, после цепочки отправляется одно итоговое письмо через Power Automate</li>
+      <li>Прогресс отображается точками: синяя = в процессе, зелёная = готово, красная = ошибка</li>
+    </ul>
+    <p><strong>Что нужно:</strong> доступ к рабочей области Power BI / Fabric (роль Member или выше), установленный модуль MSAL.PS.</p>
+    <p><strong>Тайминги:</strong> статус dataflow и каждой семантической модели проверяется каждые <strong>30 секунд</strong>. Максимальное общее время ожидания — <strong>11 часов</strong>. Если за это время обновление не завершилось — таймаут и ошибка. Сами операции выполняются на стороне Fabric, так что время зависит от объёма данных и загрузки capacity.</p>
+
+    <h4>Вкладка Rebind</h4>
+    <p><strong>Двухшаговый процесс:</strong></p>
+    <ul>
+      <li><strong>Scan</strong> (только чтение) — находит все вхождения старых GUID в <code>.tmdl</code> и <code>.json</code> файлах. Показывает контекст для каждого совпадения. <em>Не изменяет проект.</em></li>
+      <li><strong>Apply</strong> (замена + проверка) — заменяет старые GUID на новые во всех затронутых файлах, затем проверяет, что старых GUID не осталось.</li>
+    </ul>
+    <p><strong>Важно:</strong> после Scan просмотрите отдельное понятное резюме под техническим логом и выберите, продолжить Apply или остановиться. Изменения применяются на месте — убедитесь, что проект под версионным контролем.</p>
+
+    <h4>Аутентификация</h4>
+    <p>Сервер и браузер запускаются без входа. Только после нажатия <strong>«Authenticate for Refresh»</strong> сервер пытается получить токен доступа:</p>
+    <ul>
+      <li><strong>Кэш MSAL</strong> — если вы уже входили на этом компьютере, токен находится мгновенно</li>
+      <li><strong>Файл .token</strong> — сохранённый токен с прошлого запуска</li>
+      <li><strong>Device Code</strong> — если оба способа не сработали, в консоли появится код устройства. Откройте <code>https://login.microsoft.com/device</code> и введите код</li>
+    </ul>
+    <p>Вкладка <strong>Rebind не требует аутентификации или MSAL.PS</strong> — она работает только с локальными файлами.</p>
+
+    <h4>Где что лежит</h4>
+    <ul>
+      <li><code>launch.bat</code> — запуск сервера (двойной клик)</li>
+      <li><code>server.ps1</code> — HTTP-сервер и API-логика</li>
+      <li><code>index.html</code> — веб-интерфейс</li>
+      <li><code>profiles.json</code> — локальные сохранённые профили Refresh (не добавляйте в Git)</li>
+      <li><code>rebind-profiles.json</code> — локальные сохранённые профили Rebind (не добавляйте в Git)</li>
+      <li><code>_refresh-worker-template.ps1</code> — шаблон для генерации refresh worker</li>
+      <li><code>logs/</code> — папка с логами ошибок</li>
+    </ul>
+
+    <h4>Типичные проблемы</h4>
+    <ul>
+      <li><strong>Браузер открывается, но страница не грузится</strong> — подождите 5 секунд, обновите страницу</li>
+      <li><strong>«Not Authenticated» после входа</strong> — закройте консоль, запустите <code>launch.bat</code> заново</li>
+      <li><strong>«Not Authenticated» на вкладке Rebind</strong> — нормально, Rebind не требует аутентификации</li>
+      <li><strong>Ошибка «Dataflow refresh FAILED»</strong> — проверьте роль в рабочей области (нужен Member или выше)</li>
+      <li><strong>Rebind: кнопка Apply неактивна</strong> — сначала выполните Scan и дождитесь «SCAN COMPLETE» в логах</li>
+      <li><strong>Refresh: статус «Starting...» и ничего не происходит</strong> — проверьте <code>logs\worker-start.log</code></li>
+      <li><strong>Порт 8765 занят</strong> — закройте другие экземпляры сервера</li>
+    </ul>
+
+    <div class="btn-row">
+      <button class="btn btn-save" onclick="closeModal('modalHelp')">Закрыть</button>
+    </div>
+  </div>
+</div>
+
+<!-- New Profile Modal -->
+<div class="modal-overlay" id="modalNew">
+  <div class="modal">
+    <h3>New Profile</h3>
+    <div class="form-group">
+      <label>Profile name</label>
+      <input type="text" id="modalName" placeholder="e.g., My Profile">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-save" onclick="closeModal('modalNew')">Cancel</button>
+      <button class="btn btn-start" onclick="createProfile()">Create</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = window.location.origin;
+
+let profiles = [];
+let selectedId = null;
+let pollingTimer = null;
+let workerSeenRunning = false;
+let currentTab = 'refresh';
+let dataflows = [];   // array of {id, value} for multi-dataflow
+let semanticModels = []; // array of {id, workspaceId, datasetId}
+let mappings = [];
+let scanResults = null;
+let scanComplete = false;
+let rebindPolling = null;
+let rebindBusy = false;
+let rebindProfiles = [];
+let selectedRebindId = null;
+let partitionRefreshProfiles = [];
+let selectedPartitionRefreshId = null;
+let partitionRefreshPolling = null;
+let partitionRefreshSubmitting = false;
+
+// ============================================================
+// Init
+// ============================================================
+async function init() {
+  initializeRebindLogResize();
+  // Restore dataflows from localStorage
+  const savedDfs = localStorage.getItem('refresh-dataflows');
+  if (savedDfs) {
+    try { dataflows = JSON.parse(savedDfs); } catch(e) { dataflows = []; }
+  }
+  if (dataflows.length === 0) { addDataflow(); }
+  const savedModels = localStorage.getItem('refresh-semantic-models');
+  if (savedModels) {
+    try { semanticModels = JSON.parse(savedModels); } catch(e) { semanticModels = []; }
+  }
+  if (semanticModels.length === 0) { addSemanticModel(); }
+
+  await loadProfiles();
+  await loadPartitionRefreshProfiles();
+  // Restore rebind state
+  const savedMappings = localStorage.getItem('rebind-mappings');
+  if (savedMappings) {
+    try { mappings = JSON.parse(savedMappings); } catch(e) { mappings = []; }
+  }
+  if (mappings.length === 0) { addMapping(); addMapping(); }
+  const savedPath = localStorage.getItem('rebind-path');
+  if (savedPath) { document.getElementById('reportPath').value = savedPath; }
+  await loadRebindProfiles();
+
+  const lastTab = localStorage.getItem('dashboard-tab') || 'refresh';
+  if (['refresh', 'partition-refresh', 'rebind'].includes(lastTab)) switchTabSilent(lastTab);
+
+  const lastSelected = localStorage.getItem('refresh-dashboard-selected');
+  if (lastSelected && profiles.find(p => p.name === lastSelected)) {
+    selectProfile(lastSelected);
+  }
+  // Restore last selected rebind profile
+  const lastRebind = localStorage.getItem('rebind-selected');
+  if (lastRebind && rebindProfiles.find(p => p.name === lastRebind)) {
+    selectRebindProfile(lastRebind);
+  }
+  const lastPartition = localStorage.getItem('partition-refresh-selected');
+  if (lastPartition && partitionRefreshProfiles.find(p => p.name === lastPartition)) selectPartitionRefreshProfile(lastPartition);
+  pollPartitionRefreshStatus();
+  renderMappingList();
+  updateTabUI();
+}
+
+async function checkAuth() {
+  const badge = document.getElementById('authBadge');
+  const banner = document.getElementById('authBanner');
+  const message = document.getElementById('authMessage');
+  const authButton = document.getElementById('btnAuth');
+  try {
+    const resp = await fetch(API + '/api/auth/status');
+    const data = await resp.json();
+    if (data.authenticated) {
+      badge.textContent = 'Auth OK';
+      badge.className = 'status-badge done';
+      banner.style.display = 'none';
+      document.getElementById('btnStart').disabled = false;
+    } else {
+      badge.textContent = 'Not Auth';
+      badge.className = 'status-badge failed';
+      if (data.msalAvailable === false) {
+        message.textContent = 'Refresh authentication needs MSAL.PS. Rebind is fully available without it.';
+        authButton.disabled = true;
+        authButton.textContent = 'MSAL.PS not installed';
+      } else {
+        message.textContent = 'Refresh and Partition Refresh require authentication. Rebind does not.';
+        authButton.disabled = false;
+        authButton.textContent = 'Authenticate for Refresh';
+      }
+      banner.style.display = (currentTab === 'rebind') ? 'none' : 'flex';
+      document.getElementById('btnStart').disabled = true;
+    }
+  } catch(e) {
+    badge.textContent = 'Offline';
+    badge.className = 'status-badge failed';
+  }
+}
+
+async function authenticateRefresh() {
+  const button = document.getElementById('btnAuth');
+  const message = document.getElementById('authMessage');
+  button.disabled = true;
+  button.textContent = 'Waiting for sign-in...';
+  message.innerHTML = 'Complete the device-code sign-in shown in the <strong>server console</strong>. The dashboard is already open and Rebind remains independent of this login.';
+  try {
+    const resp = await fetch(API + '/api/auth/login', { method: 'POST' });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || 'Authentication failed');
+    await checkAuth();
+  } catch (e) {
+    message.textContent = 'Authentication failed: ' + e.message;
+    button.disabled = false;
+    button.textContent = 'Try authentication again';
+  }
+}
+
+// ============================================================
+// Tab switching
+// ============================================================
+function switchTab(tab) {
+  // Keep polling alive for both tabs — each poller writes to its own log container.
+  // Stopping polling on tab switch was the root cause of the log-freeze bug.
+  resetDots();
+  resetRebindDots();
+  if (tab === 'rebind' && currentTab !== 'rebind') resetRebindLogHeight();
+  currentTab = tab;
+  localStorage.setItem('dashboard-tab', tab);
+  updateTabUI();
+}
+
+function switchTabSilent(tab) {
+  if (tab === 'rebind' && currentTab !== 'rebind') resetRebindLogHeight();
+  currentTab = tab;
+  updateTabUI();
+}
+
+function updateTabUI() {
+  const pillR = document.getElementById('pillRefresh');
+  const pillP = document.getElementById('pillPartitionRefresh');
+  const pillB = document.getElementById('pillRebind');
+  pillR.classList.toggle('active', currentTab === 'refresh');
+  pillP.classList.toggle('active', currentTab === 'partition-refresh');
+  pillB.classList.toggle('active', currentTab === 'rebind');
+
+  document.getElementById('profileList').style.display = currentTab === 'refresh' ? '' : 'none';
+  document.getElementById('partitionRefreshProfileList').style.display = currentTab === 'partition-refresh' ? '' : 'none';
+  document.getElementById('rebindProfileList').style.display = currentTab === 'rebind' ? '' : 'none';
+  document.getElementById('rebindInfo').style.display = currentTab === 'rebind' ? '' : 'none';
+  document.getElementById('sidebarActions').style.display = currentTab === 'refresh' ? '' : 'none';
+  document.getElementById('partitionRefreshSidebarActions').style.display = currentTab === 'partition-refresh' ? '' : 'none';
+  document.getElementById('rebindSidebarActions').style.display = currentTab === 'rebind' ? '' : 'none';
+
+  document.getElementById('formRefresh').style.display = currentTab === 'refresh' ? '' : 'none';
+  document.getElementById('formPartitionRefresh').style.display = currentTab === 'partition-refresh' ? '' : 'none';
+  document.getElementById('formRebind').style.display = currentTab === 'rebind' ? '' : 'none';
+  document.getElementById('controlsRefresh').style.display = currentTab === 'refresh' ? '' : 'none';
+  document.getElementById('controlsPartitionRefresh').style.display = currentTab === 'partition-refresh' ? '' : 'none';
+  document.getElementById('controlsRebind').style.display = currentTab === 'rebind' ? '' : 'none';
+  document.getElementById('partitionRefreshState').style.display = currentTab === 'partition-refresh' ? '' : 'none';
+
+  // Separate log containers — show the active tab's log, hide the other
+  document.getElementById('logsRefresh').style.display = currentTab === 'refresh' ? '' : 'none';
+  document.getElementById('logsPartitionRefresh').style.display = currentTab === 'partition-refresh' ? '' : 'none';
+  document.getElementById('rebindOutput').style.display = currentTab === 'rebind' ? '' : 'none';
+  document.getElementById('semanticStatusList').style.display = currentTab === 'refresh' ? '' : 'none';
+  const refreshEmailWarning = document.getElementById('emailWarning');
+  refreshEmailWarning.style.display = currentTab === 'refresh' && refreshEmailWarning.textContent ? 'block' : 'none';
+  document.getElementById('authBadge').style.display = currentTab === 'rebind' ? 'none' : '';
+
+  // Auth banner only relevant for Refresh tab; on Rebind hide unconditionally
+  if (currentTab === 'rebind') {
+    document.getElementById('authBanner').style.display = 'none';
+  } else if (currentTab === 'partition-refresh') {
+    document.getElementById('sidebarSubtitle').textContent = 'Exact historical partition refresh';
+    document.getElementById('pageTitle').textContent = selectedPartitionRefreshId || 'Partition Refresh';
+    renderPartitionRefreshProfileList();
+  } else {
+    checkAuth();
+  }
+  // on Refresh tab: leave banner alone — checkAuth() owns its visibility
+
+  const header = document.getElementById('mainHeader');
+  header.classList.toggle('rebind', currentTab === 'rebind');
+
+  if (currentTab === 'refresh') {
+    document.getElementById('sidebarSubtitle').textContent = 'Chained dataflow(s) → semantic model(s)';
+    document.getElementById('pageTitle').textContent = selectedId || 'Select or create a profile';
+    renderDfList();
+    renderSemanticModelList();
+  } else {
+    document.getElementById('sidebarSubtitle').textContent = 'GUID replacement in PBIP projects';
+    document.getElementById('pageTitle').textContent = 'PBIP Rebind';
+    renderRebindProfileList();
+    updateRebindButtons();
+  }
+}
+
+// ============================================================
+// Profile list (refresh)
+// ============================================================
+async function loadProfiles() {
+  try {
+    const resp = await fetch(API + '/api/profiles');
+    profiles = await resp.json();
+    if (!Array.isArray(profiles)) profiles = [];
+    // Normalize old format: DataflowId string -> DataflowIds array
+    profiles.forEach(function(p) {
+      if (!p.DataflowIds) {
+        p.DataflowIds = p.DataflowId ? [p.DataflowId] : [];
+        delete p.DataflowId;
+      }
+      if (!p.SemanticModels) {
+        if (Array.isArray(p.DatasetIds)) {
+          p.SemanticModels = p.DatasetIds.map(function(datasetId) { return { WorkspaceId: p.WorkspaceId || '', DatasetId: datasetId }; });
+        } else {
+          p.SemanticModels = p.DatasetId ? [{ WorkspaceId: p.WorkspaceId || '', DatasetId: p.DatasetId }] : [];
+        }
+      }
+      p.NotifyEmails = p.NotifyEmails || '';
+      p.EmailDryRun = p.EmailDryRun === true;
+    });
+    renderProfileList();
+  } catch(e) { profiles = []; renderProfileList(); }
+}
+
+function renderProfileList() {
+  const list = document.getElementById('profileList');
+  if (profiles.length === 0) {
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">No saved profiles.<br>Click "+ New" to add one.</div>';
+    return;
+  }
+  list.innerHTML = profiles.map((p, index) => `
+    <div class="profile-card${selectedId === p.name ? ' selected' : ''}" onclick="selectProfileByIndex(${index})">
+      <div class="name">${escHtml(p.name)}</div>
+      <div class="ids">
+        <span>WS: ${escHtml(p.WorkspaceId)}</span>
+        <span>DF: ${(p.DataflowIds || []).length} dataflow(s)</span>
+        <span>SM: ${(p.SemanticModels || []).length} model(s)</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectProfileByIndex(index) {
+  const profile = profiles[index];
+  if (profile) selectProfile(profile.name);
+}
+
+function selectProfile(name) {
+  selectedId = name;
+  const p = profiles.find(x => x.name === name);
+  if (!p) return;
+  document.getElementById('profileName').value = p.name;
+  document.getElementById('workspaceId').value = p.WorkspaceId;
+  document.getElementById('notifyEmails').value = p.NotifyEmails || '';
+  document.getElementById('emailDryRun').checked = p.EmailDryRun === true;
+  validateNotifyEmails(false);
+  // Populate dataflow list
+  dataflows = (p.DataflowIds || []).map(function(df, i) {
+    return { id: Date.now() + i, value: df };
+  });
+  if (dataflows.length === 0) { addDataflow(); }
+  semanticModels = (p.SemanticModels || []).map(function(model, i) {
+    return { id: Date.now() + 1000 + i, workspaceId: model.WorkspaceId || p.WorkspaceId || '', datasetId: model.DatasetId || '' };
+  });
+  if (semanticModels.length === 0) { addSemanticModel(); }
+  persistDataflows();
+  persistSemanticModels();
+  renderDfList();
+  renderSemanticModelList();
+  document.getElementById('pageTitle').textContent = p.name;
+  document.getElementById('btnDelete').disabled = false;
+  localStorage.setItem('refresh-dashboard-selected', name);
+  renderProfileList();
+  updateTabUI();
+}
+
+// ============================================================
+// Profile CRUD
+// ============================================================
+function openNewProfile() {
+  document.getElementById('modalNew').classList.add('open');
+  document.getElementById('modalName').focus();
+  document.getElementById('modalName').value = '';
+}
+
+function closeModal(id) {
+  document.getElementById(id).classList.remove('open');
+}
+
+function openVersion() {
+  document.getElementById('modalVersion').classList.add('open');
+}
+
+function openHelp() {
+  document.getElementById('modalHelp').classList.add('open');
+}
+
+async function createProfile() {
+  const name = document.getElementById('modalName').value.trim();
+  if (!name) return;
+  if (profiles.find(p => p.name === name)) { alert('Profile with this name already exists.'); return; }
+  const emailResult = validateNotifyEmails(true);
+  if (!emailResult.valid) return;
+  const modelResult = getSemanticModelValidation();
+  if (!modelResult.valid) return alert('Every semantic model row must contain valid workspace and dataset GUIDs.');
+  profiles.push({
+    name: name,
+    WorkspaceId: document.getElementById('workspaceId').value.trim() || '',
+    DataflowIds: getValidDataflows(),
+    SemanticModels: modelResult.models,
+    NotifyEmails: emailResult.addresses.join(', '),
+    EmailDryRun: document.getElementById('emailDryRun').checked
+  });
+  if (!(await saveProfilesToDisk())) return;
+  selectProfile(name);
+  closeModal('modalNew');
+}
+
+async function saveProfile() {
+  const name = document.getElementById('profileName').value.trim();
+  if (!name) return alert('Enter a profile name.');
+  const emailResult = validateNotifyEmails(true);
+  if (!emailResult.valid) return;
+  const modelResult = getSemanticModelValidation();
+  if (!modelResult.valid) return alert('Every semantic model row must contain valid workspace and dataset GUIDs.');
+  const p = {
+    name: name,
+    WorkspaceId: document.getElementById('workspaceId').value.trim(),
+    DataflowIds: getValidDataflows(),
+    SemanticModels: modelResult.models,
+    NotifyEmails: emailResult.addresses.join(', '),
+    EmailDryRun: document.getElementById('emailDryRun').checked
+  };
+  const idx = profiles.findIndex(x => x.name === name);
+  if (idx >= 0) profiles[idx] = p; else profiles.push(p);
+  if (!(await saveProfilesToDisk())) return;
+  selectProfile(name);
+}
+
+async function deleteProfile() {
+  if (!selectedId) return;
+  if (!confirm('Delete profile "' + selectedId + '"?')) return;
+  profiles = profiles.filter(p => p.name !== selectedId);
+  selectedId = null;
+  document.getElementById('profileName').value = '';
+  document.getElementById('workspaceId').value = '';
+  document.getElementById('notifyEmails').value = '';
+  document.getElementById('emailDryRun').checked = false;
+  validateNotifyEmails(false);
+  dataflows = []; addDataflow(); persistDataflows(); renderDfList();
+  semanticModels = []; addSemanticModel(); persistSemanticModels(); renderSemanticModelList();
+  document.getElementById('pageTitle').textContent = 'Select or create a profile';
+  document.getElementById('btnDelete').disabled = true;
+  await saveProfilesToDisk();
+  renderProfileList();
+}
+
+async function saveProfilesToDisk() {
+  const response = await fetch(API + '/api/profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(profiles)
+  });
+  const result = await response.json();
+  if (!response.ok || !result.ok) { alert(result.error || 'Could not save profiles.'); return false; }
+  renderProfileList();
+  return true;
+}
+
+// ============================================================
+// Dataflow list management
+// ============================================================
+function addDataflow() {
+  const id = Date.now();
+  dataflows.push({ id: id, value: '' });
+  persistDataflows();
+  renderDfList();
+}
+
+function removeDataflow(id) {
+  if (dataflows.length <= 1) return;
+  dataflows = dataflows.filter(function(d) { return d.id !== id; });
+  persistDataflows();
+  renderDfList();
+}
+
+function updateDfGuid(id, value) {
+  const d = dataflows.find(function(x) { return x.id === id; });
+  if (d) { d.value = value; persistDataflows(); }
+}
+
+function renderDfList() {
+  const container = document.getElementById('dfList');
+  container.innerHTML = dataflows.map(function(d, i) {
+    return '<div class="df-row">' +
+      '<input type="text" id="df_' + d.id + '" value="' + escHtml(d.value || '') + '" placeholder="Dataflow GUID (' + (i + 1) + ')" oninput="updateDfGuid(' + d.id + ',this.value)">' +
+      (dataflows.length > 1 ? '<button class="btn-row-remove" onclick="removeDataflow(' + d.id + ')" title="Remove">&#x2715;</button>' : '') +
+      '</div>';
+  }).join('');
+}
+
+function getValidDataflows() {
+  return dataflows.filter(function(d) {
+    return d.value && isValidGuid(d.value);
+  }).map(function(d) { return d.value; });
+}
+
+function persistDataflows() {
+  localStorage.setItem('refresh-dataflows', JSON.stringify(dataflows));
+}
+
+// ============================================================
+// Semantic model list and notification recipients
+// ============================================================
+function addSemanticModel() {
+  const workspaceInput = document.getElementById('workspaceId');
+  semanticModels.push({ id: Date.now() + Math.floor(Math.random() * 1000), workspaceId: workspaceInput ? workspaceInput.value.trim() : '', datasetId: '' });
+  persistSemanticModels();
+  renderSemanticModelList();
+}
+
+function removeSemanticModel(id) {
+  if (semanticModels.length <= 1) return;
+  semanticModels = semanticModels.filter(function(model) { return model.id !== id; });
+  persistSemanticModels();
+  renderSemanticModelList();
+}
+
+function updateSemanticModel(id, field, value) {
+  const model = semanticModels.find(function(item) { return item.id === id; });
+  if (model) { model[field] = value; persistSemanticModels(); }
+}
+
+function renderSemanticModelList() {
+  const container = document.getElementById('semanticModelList');
+  container.innerHTML = semanticModels.map(function(model, index) {
+    return '<div class="semantic-row">' +
+      '<input type="text" value="' + escHtml(model.workspaceId || '') + '" placeholder="Workspace GUID (' + (index + 1) + ')" oninput="updateSemanticModel(' + model.id + ',\'workspaceId\',this.value)">' +
+      '<input type="text" value="' + escHtml(model.datasetId || '') + '" placeholder="Semantic model / Dataset GUID" oninput="updateSemanticModel(' + model.id + ',\'datasetId\',this.value)">' +
+      (semanticModels.length > 1 ? '<button class="btn-row-remove" onclick="removeSemanticModel(' + model.id + ')" title="Remove">&#x2715;</button>' : '<span></span>') +
+      '</div>';
+  }).join('');
+}
+
+function getSemanticModelValidation() {
+  const entered = semanticModels.map(function(model) {
+    return { WorkspaceId: (model.workspaceId || '').trim(), DatasetId: (model.datasetId || '').trim() };
+  }).filter(function(model) { return model.WorkspaceId || model.DatasetId; });
+  const invalid = entered.some(function(model) { return !isValidGuid(model.WorkspaceId) || !isValidGuid(model.DatasetId); });
+  return { valid: !invalid, models: entered.filter(function(model) { return isValidGuid(model.WorkspaceId) && isValidGuid(model.DatasetId); }) };
+}
+
+function getValidSemanticModels() {
+  return getSemanticModelValidation().models;
+}
+
+function persistSemanticModels() {
+  localStorage.setItem('refresh-semantic-models', JSON.stringify(semanticModels));
+}
+
+function parseNotifyEmails() {
+  const raw = document.getElementById('notifyEmails').value;
+  const parts = raw.split(/[;,]/).map(function(value) { return value.trim(); }).filter(Boolean);
+  const addresses = [];
+  const seen = {};
+  const invalid = [];
+  const emailPattern = /^[^\s@,;]+@[^\s@,;]+$/;
+  parts.forEach(function(address) {
+    if (!emailPattern.test(address)) { invalid.push(address); return; }
+    const key = address.toLowerCase();
+    if (!seen[key]) { seen[key] = true; addresses.push(address); }
+  });
+  return { valid: invalid.length === 0, addresses: addresses, invalid: invalid };
+}
+
+function validateNotifyEmails(normalize) {
+  const result = parseNotifyEmails();
+  const input = document.getElementById('notifyEmails');
+  const error = document.getElementById('notifyEmailsError');
+  input.classList.toggle('invalid', !result.valid);
+  error.textContent = result.valid ? '' : 'Invalid email: ' + result.invalid.join(', ');
+  if (result.valid && normalize) input.value = result.addresses.join(', ');
+  return result;
+}
+
+function renderSemanticModelStatus(details) {
+  const container = document.getElementById('semanticStatusList');
+  container.innerHTML = (details || []).map(function(detail) {
+    let cls = '';
+    if (detail.status === 'Running') cls = 'active';
+    else if (detail.status === 'Succeeded') cls = 'done';
+    else if (detail.status === 'Failed') cls = 'failed';
+    const errorText = detail.error ? ' — ' + detail.error : '';
+    const label = (detail.name || detail.id || 'Semantic model') + ' — ' + (detail.workspaceName || detail.workspaceId || '') + ': ' + (detail.status || 'Pending') + errorText;
+    return '<div class="item-status-row"><span class="dot ' + cls + '"></span><span>' + escHtml(label) + '</span></div>';
+  }).join('');
+}
+
+// ============================================================
+// Rebind profile management
+// ============================================================
+async function loadRebindProfiles() {
+  try {
+    const resp = await fetch(API + '/api/rebind-profiles');
+    rebindProfiles = await resp.json();
+    if (!Array.isArray(rebindProfiles)) rebindProfiles = [];
+    renderRebindProfileList();
+  } catch(e) { rebindProfiles = []; renderRebindProfileList(); }
+}
+
+function renderRebindProfileList() {
+  const list = document.getElementById('rebindProfileList');
+  const info = document.getElementById('rebindInfo');
+  if (rebindProfiles.length === 0) {
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">No saved rebind profiles.<br>Fill in the form and click <strong>Save Profile</strong>.</div>';
+    if (info && currentTab === 'rebind') info.style.display = '';
+    return;
+  }
+  if (info && currentTab === 'rebind') info.style.display = 'none';
+  list.innerHTML = rebindProfiles.map((p, index) => `
+    <div class="profile-card${selectedRebindId === p.name ? ' selected' : ''}" onclick="selectRebindProfileByIndex(${index})" style="border-left:3px solid var(--accent2);">
+      <div class="name">${escHtml(p.name)}</div>
+      <div class="ids">
+        <span>Path: ${escHtml(p.reportPath || '')}</span>
+        <span>Mappings: ${(p.mappings || []).length}</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectRebindProfileByIndex(index) {
+  const profile = rebindProfiles[index];
+  if (profile) selectRebindProfile(profile.name);
+}
+
+function selectRebindProfile(name) {
+  invalidateRebindScan();
+  selectedRebindId = name;
+  localStorage.setItem('rebind-selected', name);
+  const p = rebindProfiles.find(x => x.name === name);
+  if (!p) return;
+  document.getElementById('rebindProfileName').value = p.name || '';
+  document.getElementById('reportPath').value = p.reportPath || '';
+  mappings = p.mappings || [];
+  if (mappings.length === 0) { addMapping(); addMapping(); }
+  localStorage.setItem('rebind-path', p.reportPath || '');
+  localStorage.setItem('rebind-mappings', JSON.stringify(mappings));
+  persistMappings();
+  renderMappingList();
+  updateRebindButtons();
+  document.getElementById('btnDeleteRebind').disabled = false;
+  renderRebindProfileList();
+}
+
+async function saveRebindProfile() {
+  const nameInput = document.getElementById('rebindProfileName');
+  let name = nameInput.value.trim();
+  if (!name) {
+    name = 'Rebind-' + new Date().toISOString().slice(0,10);
+    nameInput.value = name;
+  }
+  const reportPath = document.getElementById('reportPath').value.trim();
+
+  // Save ALL non-empty mappings (even partial/invalid), so user data is never lost
+  const allNonEmpty = mappings.filter(function(m) {
+    return (m.fromId && m.fromId.trim()) || (m.toId && m.toId.trim());
+  });
+  if (allNonEmpty.length === 0 && mappings.length > 0 && !reportPath) {
+    alert('Enter a report folder path and at least one Old/New GUID pair.');
+    return;
+  }
+
+  const validMappings = getValidMappings();
+  if (allNonEmpty.length > 0 && validMappings.length === 0) {
+    if (!confirm('No mappings have valid GUIDs on both sides. Save anyway? Invalid mappings will be excluded from Scan.')) return;
+  }
+
+  const p = { name: name, reportPath: reportPath, mappings: allNonEmpty };
+  const idx = rebindProfiles.findIndex(function(x) { return x.name === name; });
+  if (idx >= 0) rebindProfiles[idx] = p; else rebindProfiles.push(p);
+  selectedRebindId = name;
+  localStorage.setItem('rebind-selected', name);
+  await saveRebindProfilesToDisk();
+  document.getElementById('btnDeleteRebind').disabled = false;
+  renderRebindProfileList();
+}
+
+function openNewRebindProfile() {
+  invalidateRebindScan();
+  document.getElementById('rebindProfileName').value = '';
+  document.getElementById('reportPath').value = '';
+  mappings = [{ id: Date.now(), type: 'Workspace', fromId: '', toId: '' }];
+  selectedRebindId = -1;
+  localStorage.removeItem('rebind-selected');
+  localStorage.removeItem('rebind-path');
+  renderRebindProfileList();
+  persistMappings();
+  renderMappingList();
+  document.getElementById('btnScan').disabled = true;
+  document.getElementById('btnApply').disabled = true;
+  document.getElementById('btnDeleteRebind').disabled = true;
+  clearLogs();
+}
+
+async function deleteRebindProfile() {
+  if (!selectedRebindId) return;
+  if (!confirm('Delete rebind profile "' + selectedRebindId + '"?')) return;
+  invalidateRebindScan();
+  rebindProfiles = rebindProfiles.filter(function(p) { return p.name !== selectedRebindId; });
+  selectedRebindId = null;
+  document.getElementById('rebindProfileName').value = '';
+  document.getElementById('reportPath').value = '';
+  mappings = [{ id: Date.now(), type: 'Workspace', fromId: '', toId: '' }];
+  localStorage.removeItem('rebind-selected');
+  localStorage.removeItem('rebind-path');
+  persistMappings(); renderMappingList(); updateRebindButtons();
+  document.getElementById('btnDeleteRebind').disabled = true;
+  await saveRebindProfilesToDisk();
+  renderRebindProfileList();
+}
+
+async function saveRebindProfilesToDisk() {
+  await fetch(API + '/api/rebind-profiles', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(rebindProfiles)
+  });
+  renderRebindProfileList();
+}
+
+// ============================================================
+// Partition Refresh profiles and operations
+// ============================================================
+async function loadPartitionRefreshProfiles() {
+  try {
+    const resp = await fetch(API + '/api/partition-refresh-profiles');
+    partitionRefreshProfiles = await resp.json();
+    if (!Array.isArray(partitionRefreshProfiles)) partitionRefreshProfiles = [];
+  } catch (e) { partitionRefreshProfiles = []; }
+  renderPartitionRefreshProfileList();
+}
+
+function renderPartitionRefreshProfileList() {
+  const list = document.getElementById('partitionRefreshProfileList');
+  if (!list) return;
+  if (partitionRefreshProfiles.length === 0) {
+    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">No saved partition refresh profiles.</div>';
+    return;
+  }
+  list.innerHTML = partitionRefreshProfiles.map(function(p, index) {
+    return '<div class="profile-card' + (selectedPartitionRefreshId === p.name ? ' selected' : '') + '" onclick="selectPartitionRefreshProfileByIndex(' + index + ')" style="border-left:3px solid var(--green);">' +
+      '<div class="name">' + escHtml(p.name) + '</div><div class="ids"><span>Table: ' + escHtml(p.TableName) + '</span><span>Partitions: ' + (p.Partitions || []).length + '</span></div></div>';
+  }).join('');
+}
+
+function selectPartitionRefreshProfileByIndex(index) {
+  const p = partitionRefreshProfiles[index];
+  if (p) selectPartitionRefreshProfile(p.name);
+}
+
+function selectPartitionRefreshProfile(name) {
+  const p = partitionRefreshProfiles.find(function(x) { return x.name === name; });
+  if (!p) return;
+  selectedPartitionRefreshId = name;
+  localStorage.setItem('partition-refresh-selected', name);
+  document.getElementById('partitionProfileName').value = p.name || '';
+  document.getElementById('partitionWorkspaceId').value = p.WorkspaceId || '';
+  document.getElementById('partitionDatasetId').value = p.DatasetId || '';
+  document.getElementById('partitionTableName').value = p.TableName || '';
+  document.getElementById('partitionNames').value = (p.Partitions || []).join('\n');
+  document.getElementById('btnDeletePartitionRefresh').disabled = false;
+  renderPartitionRefreshProfileList();
+  if (currentTab === 'partition-refresh') document.getElementById('pageTitle').textContent = name;
+}
+
+function newPartitionRefreshProfile() {
+  selectedPartitionRefreshId = null;
+  localStorage.removeItem('partition-refresh-selected');
+  ['partitionProfileName','partitionWorkspaceId','partitionDatasetId','partitionTableName','partitionNames'].forEach(function(id) { document.getElementById(id).value = ''; });
+  document.getElementById('btnDeletePartitionRefresh').disabled = true;
+  document.getElementById('pageTitle').textContent = 'Partition Refresh';
+  renderPartitionRefreshProfileList();
+}
+
+function getPartitionRefreshForm() {
+  const rawLines = document.getElementById('partitionNames').value.split(/\r?\n/);
+  return {
+    name: document.getElementById('partitionProfileName').value.trim(),
+    WorkspaceId: document.getElementById('partitionWorkspaceId').value.trim(),
+    DatasetId: document.getElementById('partitionDatasetId').value.trim(),
+    TableName: document.getElementById('partitionTableName').value,
+    Partitions: rawLines
+  };
+}
+
+function validatePartitionRefreshForm(p) {
+  if (!p.name) return 'Enter a profile name.';
+  if (!isValidGuid(p.WorkspaceId)) return 'Workspace ID must be a valid GUID.';
+  if (!isValidGuid(p.DatasetId)) return 'Dataset ID must be a valid GUID.';
+  if (!p.TableName || !p.TableName.trim()) return 'Table name is required.';
+  if (!p.Partitions.length || p.Partitions.some(function(x) { return !x || !x.trim(); })) return 'Every partition line must contain an exact partition name.';
+  const normalized = p.Partitions.map(function(x) { return x.toLocaleLowerCase(); });
+  if (new Set(normalized).size !== normalized.length) return 'Duplicate partition names are not allowed.';
+  return '';
+}
+
+async function savePartitionRefreshProfile() {
+  const p = getPartitionRefreshForm();
+  const error = validatePartitionRefreshForm(p);
+  if (error) return alert(error);
+  const idx = partitionRefreshProfiles.findIndex(function(x) { return x.name === p.name; });
+  if (idx >= 0) partitionRefreshProfiles[idx] = p; else partitionRefreshProfiles.push(p);
+  const resp = await fetch(API + '/api/partition-refresh-profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(partitionRefreshProfiles) });
+  const result = await resp.json();
+  if (!resp.ok || !result.ok) return alert(result.error || 'Could not save profile.');
+  selectPartitionRefreshProfile(p.name);
+}
+
+async function deletePartitionRefreshProfile() {
+  if (!selectedPartitionRefreshId || !confirm('Delete partition refresh profile "' + selectedPartitionRefreshId + '"?')) return;
+  partitionRefreshProfiles = partitionRefreshProfiles.filter(function(p) { return p.name !== selectedPartitionRefreshId; });
+  const resp = await fetch(API + '/api/partition-refresh-profiles', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(partitionRefreshProfiles) });
+  if (!resp.ok) return alert('Could not delete profile.');
+  newPartitionRefreshProfile();
+}
+
+function addPartitionRefreshLog(text, cls) {
+  const el = document.getElementById('logsPartitionRefresh');
+  if (el.querySelector('.empty-state')) el.innerHTML = '';
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = '<span class="log-time">' + new Date().toLocaleTimeString('en-GB') + '</span><span class="log-text' + (cls ? ' ' + cls : '') + '">' + escHtml(text) + '</span>';
+  el.appendChild(div); el.scrollTop = el.scrollHeight;
+}
+
+async function startPartitionRefresh() {
+  if (partitionRefreshSubmitting) return;
+  const p = getPartitionRefreshForm();
+  const error = validatePartitionRefreshForm(p);
+  if (error) return alert(error);
+  const confirmation = 'REAL REMOTE REFRESH\n\nWorkspace ID: ' + p.WorkspaceId + '\nDataset ID: ' + p.DatasetId + '\nTable: ' + p.TableName +
+    '\nPartitions:\n- ' + p.Partitions.join('\n- ') + '\n\nCommit mode: Transactional\nApply refresh policy: No\n\nSubmit this enhanced refresh now?';
+  if (!confirm(confirmation)) return;
+  partitionRefreshSubmitting = true;
+  const button = document.getElementById('btnStartPartitionRefresh');
+  button.disabled = true;
+  try {
+    const resp = await fetch(API + '/api/partition-refresh/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p) });
+    const result = await resp.json();
+    if (!resp.ok || !result.ok) { addPartitionRefreshLog(result.error || 'Submission failed.', 'error'); return; }
+    addPartitionRefreshLog('Accepted as request ' + result.requestId + '. Processing continues server-side.', 'success');
+    pollPartitionRefreshStatus();
+    if (partitionRefreshPolling) clearInterval(partitionRefreshPolling);
+    partitionRefreshPolling = setInterval(pollPartitionRefreshStatus, 10000);
+  } catch (e) { addPartitionRefreshLog('Connection error: ' + e.message, 'error'); }
+  finally { partitionRefreshSubmitting = false; button.disabled = false; }
+}
+
+function renderPartitionRefreshState(state) {
+  const attempts = arrayOf(state.attempts);
+  const objects = arrayOf(state.objects);
+  const objectHtml = objects.length ? '<br><strong>Partitions:</strong><br>' + objects.map(function(o) {
+    return escHtml((o.table || state.tableName || '') + ' / ' + (o.partition || '') + ': ' + (o.status || o.extendedStatus || 'Unknown'));
+  }).join('<br>') : '';
+  const messages = arrayOf(state.messages).slice();
+  attempts.forEach(function(attempt) {
+    if (attempt && attempt.serviceExceptionJson) messages.push(attempt.serviceExceptionJson);
+    if (attempt && Array.isArray(attempt.messages)) messages.push.apply(messages, attempt.messages);
+  });
+  const messageHtml = messages.length ? '<br><strong>Engine messages:</strong> ' + escHtml(JSON.stringify(messages)) : '';
+  document.getElementById('partitionRefreshState').innerHTML =
+    '<strong>Request ID:</strong> ' + escHtml(state.requestId || '') + '<br>' +
+    '<strong>Submitted:</strong> ' + escHtml(state.submittedAt || '') + ' &nbsp; <strong>Status:</strong> ' + escHtml(state.status || '') +
+    ' &nbsp; <strong>Extended:</strong> ' + escHtml(state.extendedStatus || '') + '<br>' +
+    '<strong>Start:</strong> ' + escHtml(state.startTime || '') + ' &nbsp; <strong>End:</strong> ' + escHtml(state.endTime || '') +
+    ' &nbsp; <strong>Attempts:</strong> ' + attempts.length + objectHtml + messageHtml +
+    '<br>Checking status uses GET only. The accepted request continues in Power BI Service if this dashboard disconnects.';
+}
+
+async function pollPartitionRefreshStatus() {
+  try {
+    const resp = await fetch(API + '/api/partition-refresh/status');
+    const result = await resp.json();
+    const state = result.state || result;
+    if (state && state.requestId) renderPartitionRefreshState(state);
+    if (result.authenticationRequired) addPartitionRefreshLog(result.error, 'warn');
+    if (state && !state.running && partitionRefreshPolling) { clearInterval(partitionRefreshPolling); partitionRefreshPolling = null; }
+  } catch (e) { }
+}
+
+async function loadPartitionRefreshHistory() {
+  const p = getPartitionRefreshForm();
+  if (!isValidGuid(p.WorkspaceId) || !isValidGuid(p.DatasetId)) return alert('Enter valid workspace and dataset IDs first.');
+  const url = API + '/api/partition-refresh/history?workspaceId=' + encodeURIComponent(p.WorkspaceId) + '&datasetId=' + encodeURIComponent(p.DatasetId);
+  const resp = await fetch(url);
+  const result = await resp.json();
+  if (!resp.ok || !result.ok) return addPartitionRefreshLog(result.error || 'Could not load history.', 'error');
+  addPartitionRefreshLog('Recent refresh history (GET only):', '');
+  (result.value || []).forEach(function(item) { addPartitionRefreshLog((item.requestId || item.id || 'unknown') + ' | ' + (item.status || item.extendedStatus || 'Unknown') + ' | ' + (item.startTime || ''), ''); });
+}
+
+// ============================================================
+// Refresh
+// ============================================================
+async function startRefresh() {
+  const ws = document.getElementById('workspaceId').value.trim();
+  const enteredDfs = dataflows.map(function(item) { return (item.value || '').trim(); }).filter(Boolean);
+  const validDfs = getValidDataflows();
+  const modelResult = getSemanticModelValidation();
+  const emailResult = validateNotifyEmails(true);
+  if (!isValidGuid(ws)) return alert('Enter a valid dataflow workspace ID.');
+  if (validDfs.length === 0 || validDfs.length !== enteredDfs.length) return alert('Enter at least one dataflow and make every dataflow ID a valid GUID.');
+  if (!modelResult.valid || modelResult.models.length === 0) return alert('Add at least one semantic model with valid workspace and dataset GUIDs.');
+  if (!emailResult.valid) return alert('Correct the notification email addresses before starting.');
+
+  document.getElementById('btnStart').disabled = true;
+  workerSeenRunning = false;
+  setStatus('Starting...', 'running');
+  clearLogs();
+  resetDots();
+  document.getElementById('emailWarning').style.display = 'none';
+  document.getElementById('emailWarning').textContent = '';
+  renderSemanticModelStatus(modelResult.models.map(function(model) {
+    return { id: model.DatasetId, workspaceId: model.WorkspaceId, status: 'Pending' };
+  }));
+
+  try {
+    const resp = await fetch(API + '/api/refresh/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        WorkspaceId: ws,
+        DataflowIds: validDfs,
+        SemanticModels: modelResult.models,
+        NotificationRecipients: emailResult.addresses,
+        EmailDryRun: document.getElementById('emailDryRun').checked
+      })
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      addLog('Failed to start: ' + (data.error || 'Unknown'), 'error');
+      setStatus('Failed', 'failed');
+      document.getElementById('btnStart').disabled = false;
+      return;
+    }
+    startPolling();
+  } catch(e) {
+    addLog('Connection error: ' + e.message, 'error');
+    setStatus('Error', 'failed');
+    document.getElementById('btnStart').disabled = false;
+  }
+}
+
+function startPolling() {
+  if (pollingTimer) clearInterval(pollingTimer);
+  pollingTimer = setInterval(pollStatus, 2000);
+}
+
+async function pollStatus() {
+  try {
+    const resp = await fetch(API + '/api/refresh/status');
+    const state = await resp.json();
+
+    // Render logs — always to Refresh container (polling continues even if Rebind tab active)
+    if (state.logs && state.logs.length > 0) {
+      const logsEl = document.getElementById('logsRefresh');
+      const currentCount = logsEl.querySelectorAll('.log-entry').length;
+      for (let i = currentCount; i < state.logs.length; i++) {
+        const entry = state.logs[i];
+        let cls = '';
+        if (entry.text.includes('ERROR') || entry.text.includes('FAILED')) cls = 'error';
+        else if (entry.text.includes('completed') || entry.text.includes('SUCCESS')) cls = 'success';
+        else if (entry.text.includes('WARNING')) cls = 'warn';
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        div.innerHTML = '<span class="log-time">' + escHtml(entry.time) + '</span><span class="log-text' + (cls ? ' ' + cls : '') + '">' + escHtml(entry.text) + '</span>';
+        logsEl.appendChild(div);
+        logsEl.scrollTop = logsEl.scrollHeight;
+      }
+    }
+
+    // Update dots
+    updateDot('dotDataflow', state.dataflowStatus);
+    updateDot('dotDataset', state.datasetStatus);
+    renderSemanticModelStatus(state.semanticModelDetails || []);
+    const emailWarning = document.getElementById('emailWarning');
+    if (state.emailWarning) {
+      emailWarning.textContent = state.emailWarning;
+      emailWarning.style.display = currentTab === 'refresh' ? 'block' : 'none';
+    } else {
+      emailWarning.style.display = 'none';
+      emailWarning.textContent = '';
+    }
+
+    // Update status badge
+    if (state.running) {
+      workerSeenRunning = true;
+      setStatus('Running', 'running');
+    } else if (state.result === 'Failed' || state.error) {
+      setStatus('Failed', 'failed');
+      stopPolling();
+      document.getElementById('btnStart').disabled = false;
+    } else if (state.result === 'Succeeded' || (state.dataflowStatus === 'Success' && state.datasetStatus === 'Completed')) {
+      setStatus(state.emailWarning ? 'Done — email warning' : 'Done', 'done');
+      stopPolling();
+      document.getElementById('btnStart').disabled = false;
+    } else if (!workerSeenRunning) {
+      // Worker hasn't started yet — still initializing (or died silently)
+      // Keep "Starting..." badge; if it stays too long, user will notice
+      // After 10s of no worker activity, flag as likely dead
+      setStatus('Starting...', 'running');
+    } else {
+      // Was running, now not — worker crashed without setting error
+      setStatus('Worker died', 'failed');
+      stopPolling();
+      document.getElementById('btnStart').disabled = false;
+      addLog('Worker process died unexpectedly. Check logs/refresh-worker-errors.log', 'error');
+    }
+  } catch(e) {
+    // Server might be restarting
+  }
+}
+
+function stopPolling() {
+  if (pollingTimer) { clearInterval(pollingTimer); pollingTimer = null; }
+}
+
+// ============================================================
+// Rebind — Mapping rows
+// ============================================================
+function addMapping() {
+  invalidateRebindScan();
+  const id = Date.now();
+  mappings.push({ id: id, type: 'Workspace', fromId: '', toId: '' });
+  persistMappings();
+  renderMappingList();
+  updateRebindButtons();
+}
+
+function removeMapping(id) {
+  if (mappings.length <= 1) return;
+  invalidateRebindScan();
+  mappings = mappings.filter(function(m) { return m.id !== id; });
+  persistMappings();
+  renderMappingList();
+  updateRebindButtons();
+}
+
+function renderMappingList() {
+  const container = document.getElementById('mappingList');
+  container.innerHTML = mappings.map(function(m, i) {
+    const fromCls = m.fromId ? (isValidGuid(m.fromId) ? 'valid' : 'invalid') : '';
+    const toCls = m.toId ? (isValidGuid(m.toId) ? 'valid' : 'invalid') : '';
+    return '<div class="mapping-row">' +
+      '<div class="form-group"><label>Type</label><select onchange="updateMappingType(' + m.id + ',this.value)">' +
+      '<option value="Workspace"' + (m.type === 'Workspace' ? ' selected' : '') + '>Workspace</option>' +
+      '<option value="Dataflow"' + (m.type === 'Dataflow' ? ' selected' : '') + '>Dataflow</option>' +
+      '<option value="Dataset"' + (m.type === 'Dataset' ? ' selected' : '') + '>Dataset</option>' +
+      '</select></div>' +
+      '<div class="form-group"><label>Old GUID</label><input type="text" id="from_' + m.id + '" class="' + fromCls + '" value="' + escHtml(m.fromId || '') + '" placeholder="Old GUID" oninput="updateMappingGuid(' + m.id + ',\'from\',this.value)"></div>' +
+      '<button class="btn-row-swap" onclick="swapMapping(' + m.id + ')" title="Swap Old ↔ New">⇄</button>' +
+      '<div class="form-group"><label>New GUID</label><input type="text" id="to_' + m.id + '" class="' + toCls + '" value="' + escHtml(m.toId || '') + '" placeholder="New GUID" oninput="updateMappingGuid(' + m.id + ',\'to\',this.value)"></div>' +
+      (mappings.length > 1 ? '<button class="btn-row-remove" onclick="removeMapping(' + m.id + ')" title="Remove">&#x2715;</button>' : '<div></div>') +
+      '</div>';
+  }).join('');
+}
+
+function swapMapping(id) {
+  const m = mappings.find(function(x) { return x.id === id; });
+  if (!m) return;
+  invalidateRebindScan();
+  const tmp = m.fromId;
+  m.fromId = m.toId;
+  m.toId = tmp;
+  persistMappings();
+  renderMappingList();
+}
+
+function updateMappingType(id, type) {
+  invalidateRebindScan();
+  const m = mappings.find(function(x) { return x.id === id; });
+  if (m) { m.type = type; persistMappings(); }
+}
+
+function updateMappingGuid(id, field, value) {
+  invalidateRebindScan();
+  const m = mappings.find(function(x) { return x.id === id; });
+  if (m) { m[field + 'Id'] = value; persistMappings(); }
+  // Apply validation coloring
+  const el = document.getElementById(field + '_' + id);
+  if (el) {
+    el.classList.remove('valid', 'invalid');
+    if (value.trim() && !isValidGuid(value.trim())) {
+      el.classList.add('invalid');
+    } else if (value.trim() && isValidGuid(value.trim())) {
+      el.classList.add('valid');
+    }
+  }
+  updateRebindButtons();
+}
+
+function getValidMappings() {
+  return mappings.filter(function(m) {
+    return m.fromId && m.toId && isValidGuid(m.fromId) && isValidGuid(m.toId);
+  });
+}
+
+function persistMappings() {
+  localStorage.setItem('rebind-mappings', JSON.stringify(mappings));
+}
+
+function isValidGuid(s) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s);
+}
+
+function onPathChange() {
+  invalidateRebindScan();
+  const path = document.getElementById('reportPath').value.trim();
+  const errEl = document.getElementById('pathError');
+  errEl.textContent = '';
+  if (path) {
+    localStorage.setItem('rebind-path', path);
+  }
+  updateRebindButtons();
+}
+
+function updateRebindButtons() {
+  const path = document.getElementById('reportPath').value.trim();
+  const validMappings = getValidMappings();
+  document.getElementById('btnScan').disabled = rebindBusy || !path || validMappings.length === 0;
+  document.getElementById('btnApply').disabled = rebindBusy || !scanComplete;
+}
+
+function invalidateRebindScan() {
+  if (rebindBusy) return;
+  scanComplete = false;
+  scanResults = null;
+  const applyButton = document.getElementById('btnApply');
+  if (applyButton) applyButton.disabled = true;
+  hideRebindSummary();
+}
+
+// ============================================================
+// Rebind — Scan (Phase 1)
+// ============================================================
+async function startScan() {
+  const reportPath = document.getElementById('reportPath').value.trim();
+  const validMappings = getValidMappings();
+  if (rebindBusy || !reportPath || validMappings.length === 0) return;
+
+  rebindBusy = true;
+  scanComplete = false;
+  scanResults = null;
+  hideRebindSummary();
+  updateRebindButtons();
+  setStatus('Scanning...', 'running');
+  clearLogs();
+  resetRebindDots();
+  updateRebindDot('dotScan', 'active');
+
+  try {
+    const resp = await fetch(API + '/api/rebind/scan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ReportPath: reportPath,
+        Mappings: validMappings.map(m => ({ Type: m.type, OldGuid: m.fromId.trim(), NewGuid: m.toId.trim() }))
+      })
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      addLog('Scan failed: ' + (data.error || 'Unknown'), 'error');
+      setStatus('Failed', 'failed');
+      updateRebindDot('dotScan', 'failed');
+      rebindBusy = false;
+      updateRebindButtons();
+      showRebindFailure('Scan could not start', data.error || 'Unknown error');
+      return;
+    }
+    startRebindPolling('scan');
+  } catch(e) {
+    addLog('Connection error: ' + e.message, 'error');
+    setStatus('Error', 'failed');
+    updateRebindDot('dotScan', 'failed');
+    rebindBusy = false;
+    updateRebindButtons();
+    showRebindFailure('Scan could not start', e.message);
+  }
+}
+
+// ============================================================
+// Rebind — Apply (Phase 2+3, no confirmation modal)
+// ============================================================
+async function startApply() {
+  if (rebindBusy || !scanComplete) return;
+  rebindBusy = true;
+  hideRebindSummary();
+  updateRebindButtons();
+  setStatus('Applying...', 'running');
+  clearLogs();  // Worker resets logs=@(); DOM must reset too
+  resetRebindDots();
+  updateRebindDot('dotScan', 'done');
+  updateRebindDot('dotReplace', 'active');
+
+  const reportPath = document.getElementById('reportPath').value.trim();
+  const validMappings = getValidMappings();
+
+  try {
+    const resp = await fetch(API + '/api/rebind/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ReportPath: reportPath,
+        Mappings: validMappings.map(m => ({ Type: m.type, OldGuid: m.fromId.trim(), NewGuid: m.toId.trim() }))
+      })
+    });
+    const data = await resp.json();
+    if (!data.ok) {
+      addLog('Apply failed: ' + (data.error || 'Unknown'), 'error');
+      setStatus('Failed', 'failed');
+      updateRebindDot('dotReplace', 'failed');
+      rebindBusy = false;
+      scanComplete = false;
+      updateRebindButtons();
+      showRebindFailure('Rebind was not applied', data.error || 'Unknown error');
+      return;
+    }
+    startRebindPolling('apply');
+  } catch(e) {
+    addLog('Connection error: ' + e.message, 'error');
+    setStatus('Error', 'failed');
+    updateRebindDot('dotReplace', 'failed');
+    rebindBusy = false;
+    scanComplete = false;
+    updateRebindButtons();
+    showRebindFailure('Rebind was not applied', e.message);
+  }
+}
+
+// ============================================================
+// Rebind — Status polling
+// ============================================================
+function startRebindPolling(phase) {
+  stopRebindPolling();
+  rebindPolling = setInterval(function() { pollRebindStatus(phase); }, 1000);
+  pollRebindStatus(phase);
+}
+
+function stopRebindPolling() {
+  if (rebindPolling) { clearInterval(rebindPolling); rebindPolling = null; }
+}
+
+async function pollRebindStatus(expectedPhase) {
+  try {
+    const resp = await fetch(API + '/api/rebind/status');
+    const state = await resp.json();
+
+    // Render logs — always to Rebind container (polling continues even if Refresh tab active)
+    if (state.logs && state.logs.length > 0) {
+      const logsEl = document.getElementById('logsRebind');
+      const currentCount = logsEl.querySelectorAll('.log-entry').length;
+      for (let i = currentCount; i < state.logs.length; i++) {
+        const entry = state.logs[i];
+        let cls = '';
+        if (entry.text.includes('SUCCESS') || entry.text.includes('OK:')) cls = 'success';
+        else if (entry.text.includes('ERROR') || entry.text.includes('FAIL')) cls = 'error';
+        else if (entry.text.includes('WARNING') || entry.text.includes('ambiguous') || entry.text.includes('already present')) cls = 'warn';
+        else if (entry.text.includes('SCAN COMPLETE') || entry.text.includes('VERIFICATION')) cls = 'highlight';
+        const div = document.createElement('div');
+        div.className = 'log-entry';
+        div.innerHTML = '<span class="log-time">' + escHtml(entry.time) + '</span><span class="log-text' + (cls ? ' ' + cls : '') + '">' + escHtml(entry.text) + '</span>';
+        logsEl.appendChild(div);
+        logsEl.scrollTop = logsEl.scrollHeight;
+      }
+    }
+
+    // Update phase dots and buttons
+    switch (state.phase) {
+      case 'starting_scan':
+      case 'scanning':
+        updateRebindDot('dotScan', 'active');
+        updateRebindDot('dotReplace', '');
+        updateRebindDot('dotVerify', '');
+        break;
+      case 'scan_done':
+        updateRebindDot('dotScan', 'done');
+        updateRebindDot('dotReplace', '');
+        updateRebindDot('dotVerify', '');
+        rebindBusy = false;
+        scanResults = state.scanResults;
+        const totalHits = getScanTotalHits(scanResults);
+        scanComplete = totalHits > 0;
+        updateRebindButtons();
+        setStatus('Scan complete', 'done');
+        showScanSummary(scanResults);
+        stopRebindPolling();
+        break;
+      case 'starting_apply':
+      case 'replacing':
+        updateRebindDot('dotScan', 'done');
+        updateRebindDot('dotReplace', 'active');
+        updateRebindDot('dotVerify', '');
+        break;
+      case 'verifying':
+        updateRebindDot('dotScan', 'done');
+        updateRebindDot('dotReplace', 'done');
+        updateRebindDot('dotVerify', 'active');
+        break;
+      case 'done':
+        updateRebindDot('dotScan', 'done');
+        updateRebindDot('dotReplace', 'done');
+        updateRebindDot('dotVerify', 'done');
+        setStatus('Done', 'done');
+        rebindBusy = false;
+        scanComplete = false;
+        updateRebindButtons();
+        showApplySummary(state.applyResults, true);
+        stopRebindPolling();
+        break;
+      case 'failed':
+        setStatus('Failed', 'failed');
+        rebindBusy = false;
+        scanComplete = false;
+        updateRebindButtons();
+        if (state.applyResults) showApplySummary(state.applyResults, false, state.error);
+        else showRebindFailure(expectedPhase === 'apply' ? 'Rebind failed' : 'Scan failed', state.error || 'See the technical log for details.');
+        stopRebindPolling();
+        break;
+    }
+  } catch(e) {
+    // Server might be restarting
+  }
+}
+
+// ============================================================
+// Rebind — plain-language summary and decision
+// ============================================================
+function arrayOf(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function getScanTotalHits(results) {
+  return arrayOf(results && results.mappings).reduce(function(total, mapping) {
+    return total + (Number(mapping.totalOccurrences) || 0);
+  }, 0);
+}
+
+function setSummaryStats(items) {
+  document.getElementById('rebindSummaryStats').innerHTML = items.map(function(item) {
+    return '<div class="rebind-summary-stat"><strong>' + escHtml(String(item.value)) + '</strong><span>' + escHtml(item.label) + '</span></div>';
+  }).join('');
+}
+
+function showScanSummary(results) {
+  const summary = document.getElementById('rebindSummary');
+  const scanMappings = arrayOf(results && results.mappings);
+  const totalHits = getScanTotalHits(results);
+  const zeroHitMappings = scanMappings.filter(function(mapping) { return !Number(mapping.totalOccurrences); });
+  const newGuidWarnings = arrayOf(results && results.newGuidPresence).length;
+  const ambiguousWarnings = scanMappings.reduce(function(total, mapping) { return total + arrayOf(mapping.ambiguous).length; }, 0);
+  const warningCount = zeroHitMappings.length + newGuidWarnings + ambiguousWarnings;
+
+  summary.className = 'rebind-summary visible ' + (totalHits === 0 ? 'warning' : (warningCount > 0 ? 'warning' : 'ready'));
+  document.getElementById('rebindSummaryIcon').textContent = totalHits === 0 ? '○' : (warningCount > 0 ? '⚠' : '✓');
+  document.getElementById('rebindSummaryTitle').textContent = totalHits === 0 ? 'Nothing to rebind' : (warningCount > 0 ? 'Review before continuing' : 'Ready to apply');
+  document.getElementById('rebindSummaryMessage').textContent = totalHits === 0
+    ? 'Scan did not find any old GUID occurrences. No files have been changed, and Apply is disabled.'
+    : 'Scan was read-only. Review this summary, then choose whether to apply the replacements.';
+
+  setSummaryStats([
+    { value: Number(results && results.targetFileCount) || 0, label: 'files inspected' },
+    { value: Number(results && results.matchedFileCount) || 0, label: 'files containing old GUIDs' },
+    { value: totalHits, label: 'replacements proposed' },
+    { value: warningCount, label: 'items to review' }
+  ]);
+
+  const details = [];
+  if (zeroHitMappings.length) details.push(zeroHitMappings.length + ' mapping(s) have no matches');
+  if (newGuidWarnings) details.push(newGuidWarnings + ' new GUID occurrence(s) already exist');
+  if (ambiguousWarnings) details.push(ambiguousWarnings + ' match(es) are in an unexpected JSON context');
+  document.getElementById('rebindSummaryDetails').textContent = details.length
+    ? details.join(' • ') + '. The technical log above has file-level details.'
+    : 'No warnings were found. Apply will still verify that every old GUID was removed.';
+
+  document.getElementById('btnSummaryApply').style.display = totalHits > 0 ? '' : 'none';
+  document.getElementById('btnSummaryApply').disabled = totalHits <= 0;
+  document.getElementById('btnSummaryStop').style.display = '';
+  document.getElementById('btnSummaryReset').style.display = totalHits > 0 ? 'none' : '';
+}
+
+function showApplySummary(results, succeeded, errorMessage) {
+  const summary = document.getElementById('rebindSummary');
+  const filesChanged = arrayOf(results && results.filesChanged).length;
+  const replacements = Number(results && results.totalReplacements) || 0;
+  const mappingCount = arrayOf(results && results.mappings).length;
+  const remainingByGuid = (results && results.verification && results.verification.oldGuidsRemaining) || {};
+  const remaining = Object.keys(remainingByGuid).reduce(function(total, guid) { return total + arrayOf(remainingByGuid[guid]).length; }, 0);
+
+  summary.className = 'rebind-summary visible ' + (succeeded ? 'success' : 'failed');
+  document.getElementById('rebindSummaryIcon').textContent = succeeded ? '✓' : '✕';
+  document.getElementById('rebindSummaryTitle').textContent = succeeded ? 'Rebind completed and verified' : 'Rebind needs attention';
+  document.getElementById('rebindSummaryMessage').textContent = succeeded
+    ? 'The requested replacements were written and no old GUIDs remain in the target files.'
+    : (errorMessage || 'Verification found old GUIDs that remain. Review the technical log before trying again.');
+  setSummaryStats([
+    { value: filesChanged, label: 'files changed' },
+    { value: replacements, label: 'replacements made' },
+    { value: mappingCount, label: 'mappings processed' },
+    { value: remaining, label: 'old-GUID locations remaining' }
+  ]);
+  document.getElementById('rebindSummaryDetails').textContent = succeeded
+    ? 'Next step: open the PBIP project in Power BI Desktop and confirm that its connections work as expected.'
+    : 'No automatic retry was attempted. Correct the issue shown in the log, then run a fresh Scan.';
+  document.getElementById('btnSummaryApply').style.display = 'none';
+  document.getElementById('btnSummaryStop').style.display = 'none';
+  document.getElementById('btnSummaryReset').style.display = '';
+}
+
+function showRebindFailure(title, message) {
+  const summary = document.getElementById('rebindSummary');
+  summary.className = 'rebind-summary visible failed';
+  document.getElementById('rebindSummaryIcon').textContent = '✕';
+  document.getElementById('rebindSummaryTitle').textContent = title;
+  document.getElementById('rebindSummaryMessage').textContent = message || 'See the technical log for details.';
+  setSummaryStats([]);
+  document.getElementById('rebindSummaryDetails').textContent = 'No further action was taken. Fix the input or reported error, then run Scan again.';
+  document.getElementById('btnSummaryApply').style.display = 'none';
+  document.getElementById('btnSummaryStop').style.display = 'none';
+  document.getElementById('btnSummaryReset').style.display = '';
+}
+
+async function declineRebind() {
+  try { await fetch(API + '/api/rebind/cancel', { method: 'POST' }); } catch (e) { }
+  scanComplete = false;
+  scanResults = null;
+  updateRebindButtons();
+  const summary = document.getElementById('rebindSummary');
+  summary.className = 'rebind-summary visible warning';
+  document.getElementById('rebindSummaryIcon').textContent = '■';
+  document.getElementById('rebindSummaryTitle').textContent = 'Stopped — nothing was changed';
+  document.getElementById('rebindSummaryMessage').textContent = 'You chose not to apply the scan results. Scan was read-only, so the PBIP project is unchanged.';
+  document.getElementById('rebindSummaryDetails').textContent = 'You can adjust the path or mappings and run another Scan when ready.';
+  document.getElementById('btnSummaryApply').style.display = 'none';
+  document.getElementById('btnSummaryStop').style.display = 'none';
+  document.getElementById('btnSummaryReset').style.display = '';
+  setStatus('Not applied', '');
+}
+
+function resetRebindWorkflow() {
+  rebindBusy = false;
+  invalidateRebindScan();
+  clearLogs();
+  resetRebindDots();
+  setStatus('Idle', '');
+  updateRebindButtons();
+}
+
+function hideRebindSummary() {
+  const summary = document.getElementById('rebindSummary');
+  if (summary) summary.className = 'rebind-summary';
+}
+
+// ============================================================
+// Rebind — Dot helpers
+// ============================================================
+function resetRebindDots() {
+  ['dotScan','dotReplace','dotVerify'].forEach(id => {
+    document.getElementById(id).className = 'dot';
+  });
+}
+
+function updateRebindDot(id, status) {
+  const el = document.getElementById(id);
+  if (status === 'active') el.className = 'dot active';
+  else if (status === 'done') el.className = 'dot done';
+  else if (status === 'failed') el.className = 'dot failed';
+  else el.className = 'dot';
+}
+
+// ============================================================
+// UI helpers
+// ============================================================
+function setStatus(text, cls) {
+  const badge = document.getElementById('statusBadge');
+  badge.textContent = text;
+  badge.className = 'status-badge ' + (cls || '');
+}
+
+function clearLogs() {
+  const containerId = currentTab === 'refresh' ? 'logsRefresh' : (currentTab === 'partition-refresh' ? 'logsPartitionRefresh' : 'logsRebind');
+  document.getElementById(containerId).innerHTML = '';
+}
+
+function resetRebindLogHeight() {
+  const logs = document.getElementById('logsRebind');
+  if (logs) logs.style.height = '';
+}
+
+function initializeRebindLogResize() {
+  const handle = document.getElementById('rebindLogResizeHandle');
+  const logs = document.getElementById('logsRebind');
+  const output = document.getElementById('rebindOutput');
+  if (!handle || !logs || !output) return;
+
+  let startY = 0;
+  let startHeight = 0;
+
+  handle.addEventListener('pointerdown', function(event) {
+    if (currentTab !== 'rebind') return;
+    startY = event.clientY;
+    startHeight = logs.getBoundingClientRect().height;
+    handle.setPointerCapture(event.pointerId);
+    handle.classList.add('dragging');
+    event.preventDefault();
+  });
+
+  handle.addEventListener('pointermove', function(event) {
+    if (!handle.hasPointerCapture(event.pointerId)) return;
+    const minimumHeight = 120;
+    const maximumHeight = Math.max(minimumHeight, output.clientHeight);
+    const requestedHeight = startHeight + event.clientY - startY;
+    const nextHeight = Math.min(maximumHeight, Math.max(minimumHeight, requestedHeight));
+    logs.style.height = nextHeight + 'px';
+  });
+
+  function finishResize(event) {
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+    handle.classList.remove('dragging');
+  }
+
+  handle.addEventListener('pointerup', finishResize);
+  handle.addEventListener('pointercancel', finishResize);
+}
+
+function addLogEntry(time, text, cls) {
+  const containerId = currentTab === 'refresh' ? 'logsRefresh' : (currentTab === 'partition-refresh' ? 'logsPartitionRefresh' : 'logsRebind');
+  const el = document.getElementById(containerId);
+  const div = document.createElement('div');
+  div.className = 'log-entry';
+  div.innerHTML = '<span class="log-time">' + escHtml(time) + '</span><span class="log-text' + (cls ? ' ' + cls : '') + '">' + escHtml(text) + '</span>';
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function addLog(text, cls) {
+  const now = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  addLogEntry(now, text, cls);
+}
+
+function resetDots() {
+  ['dotDataflow','dotDataset'].forEach(id => {
+    document.getElementById(id).className = 'dot';
+  });
+  const semanticStatus = document.getElementById('semanticStatusList');
+  if (semanticStatus) semanticStatus.innerHTML = '';
+}
+
+function updateDot(id, status) {
+  const el = document.getElementById(id);
+  const done = ['Success','Succeeded','Completed'];
+  const fail = ['Failure','Failed','Cancelled','Disabled'];
+  if (done.includes(status)) el.className = 'dot done';
+  else if (fail.includes(status)) el.className = 'dot failed';
+  else if (status && (status.indexOf('Running') === 0 || status.indexOf('InProgress') === 0)) el.className = 'dot active';
+}
+
+function escHtml(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+init();
+</script>
+</body>
+</html>
