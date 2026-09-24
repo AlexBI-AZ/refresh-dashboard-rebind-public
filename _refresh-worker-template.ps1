@@ -2,6 +2,7 @@ $ErrorActionPreference = "Stop"
 $statusFile = "{{StatusFile}}"
 $logsDir = "{{LogsDir}}"
 $emailModule = "{{EmailModule}}"
+$tokenFile = "{{TokenFile}}"
 $token = "{{Token}}"
 $payloadJson = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String("{{RefreshPayload}}"))
 $payload = $payloadJson | ConvertFrom-Json
@@ -42,6 +43,70 @@ function Log {
     } catch { }
 }
 
+function Test-TokenExpired {
+    param([AllowNull()][string]$Candidate)
+
+    if ([string]::IsNullOrWhiteSpace($Candidate)) { return $true }
+    try {
+        $payload = $Candidate.Split('.')[1].Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) {
+            2 { $payload += '==' }
+            3 { $payload += '=' }
+        }
+        $claims = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payload)) | ConvertFrom-Json
+        return ([DateTimeOffset]::FromUnixTimeSeconds([long]$claims.exp) -le (Get-Date).ToUniversalTime())
+    } catch {
+        return $false
+    }
+}
+
+function Update-TokenFromFile {
+    param([string]$SpentToken)
+
+    try {
+        if (-not (Test-Path -LiteralPath $tokenFile)) { return $false }
+        $saved = Get-Content -LiteralPath $tokenFile -Raw | ConvertFrom-Json
+        if (-not $saved.Token -or $saved.Token -eq $SpentToken) { return $false }
+        if (Test-TokenExpired $saved.Token) { return $false }
+        $script:token = [string]$saved.Token
+        $script:headers = @{ Authorization = "Bearer $token"; "Content-Type" = "application/json" }
+        Log "Access token expired; reloaded a fresh token from the dashboard."
+        return $true
+    } catch {
+        return $false
+    }
+}
+
+function Invoke-PbiApi {
+    param(
+        [string]$Method,
+        [string]$Uri,
+        [AllowNull()][string]$Body,
+        [switch]$ReturnResponse
+    )
+
+    # A refresh can outlive the token that launched it. When Power BI rejects that token,
+    # reload the dashboard's token file once and retry before reporting the call as failed.
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        try {
+            $params = @{ Method = $Method; Uri = $Uri; Headers = $headers }
+            if ($Body) { $params.Body = $Body }
+            if ($ReturnResponse) { return Invoke-WebRequest @params -UseBasicParsing }
+            return Invoke-RestMethod @params
+        } catch {
+            $statusCode = try { [int]$_.Exception.Response.StatusCode } catch { 0 }
+            $rejectedToken = ($statusCode -eq 401 -or $statusCode -eq 403)
+            if ($attempt -eq 2 -or -not $rejectedToken) { throw }
+            if (Update-TokenFromFile $token) { continue }
+            if ((Test-TokenExpired $token) -and -not $authWarningLogged) {
+                $script:authWarningLogged = $true
+                Log "WARNING: the access token expired during the refresh (HTTP $statusCode). Re-authenticate for Refresh in the dashboard, then run the refresh again."
+            }
+            throw
+        }
+    }
+}
+
 function Publish-Status {
     param(
         [string]$DataflowStatus,
@@ -66,7 +131,7 @@ function Get-WorkspaceName {
 
     if ($workspaceNames.ContainsKey($WorkspaceId)) { return $workspaceNames[$WorkspaceId] }
     try {
-        $group = Invoke-RestMethod -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId" -Headers $headers
+        $group = Invoke-PbiApi -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId"
         $name = if ($group.name) { [string]$group.name } else { $WorkspaceId }
     } catch {
         $name = $WorkspaceId
@@ -80,7 +145,7 @@ function Get-DataflowName {
     param([string]$WorkspaceId, [string]$DataflowId)
 
     try {
-        $item = Invoke-RestMethod -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/dataflows/$DataflowId" -Headers $headers
+        $item = Invoke-PbiApi -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/dataflows/$DataflowId"
         if ($item.name) { return [string]$item.name }
     } catch { }
     return $DataflowId
@@ -90,7 +155,7 @@ function Get-SemanticModelName {
     param([string]$WorkspaceId, [string]$DatasetId)
 
     try {
-        $item = Invoke-RestMethod -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/datasets/$DatasetId" -Headers $headers
+        $item = Invoke-PbiApi -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$WorkspaceId/datasets/$DatasetId"
         if ($item.name) { return [string]$item.name }
     } catch { }
     return $DatasetId
@@ -179,6 +244,7 @@ $dataflowDetails = @()
 $modelDetails = @()
 $refreshErrors = New-Object System.Collections.Generic.List[string]
 $refreshFailed = $false
+$authWarningLogged = $false
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
 [ordered]@{
@@ -227,7 +293,7 @@ try {
     Log "=== DATAFLOWS: triggering $($dataflowDetails.Count) dataflow(s) ==="
     foreach ($detail in $dataflowDetails) {
         try {
-            Invoke-WebRequest -Method POST -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/dataflows/$($detail.id)/refreshes" -Headers $headers -Body '{"notifyOption":"NoNotification"}' -UseBasicParsing | Out-Null
+            Invoke-PbiApi -Method POST -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/dataflows/$($detail.id)/refreshes" -Body '{"notifyOption":"NoNotification"}' -ReturnResponse | Out-Null
             $detail.status = "Running"
             Log "  Dataflow '$($detail.name)' in '$($detail.workspaceName)': running."
         } catch {
@@ -251,7 +317,7 @@ try {
 
         foreach ($detail in @($dataflowDetails | Where-Object { -not (Test-TerminalDataflowStatus $_.status) })) {
             try {
-                $transactions = Invoke-RestMethod -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/dataflows/$($detail.id)/transactions" -Headers $headers
+                $transactions = Invoke-PbiApi -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/dataflows/$($detail.id)/transactions"
                 $latest = $transactions.value | Sort-Object startTime -Descending | Select-Object -First 1
                 if ($latest.status -eq "Success") {
                     $detail.status = "Succeeded"
@@ -265,7 +331,7 @@ try {
                 $statusCode = try { [int]$_.Exception.Response.StatusCode } catch { 0 }
                 if ($statusCode -eq 404) {
                     try {
-                        Invoke-RestMethod -Method POST -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/dataflows/$($detail.id)/refreshes" -Headers $headers -Body '{"notifyOption":"NoNotification"}' | Out-Null
+                        Invoke-PbiApi -Method POST -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/dataflows/$($detail.id)/refreshes" -Body '{"notifyOption":"NoNotification"}' | Out-Null
                         $detail.status = "Succeeded"
                         Log "  Dataflow '$($detail.name)' in '$($detail.workspaceName)': succeeded."
                     } catch {
@@ -308,7 +374,7 @@ try {
         Log "=== SEMANTIC MODELS: triggering $($modelDetails.Count) model(s) ==="
         foreach ($detail in $modelDetails) {
             try {
-                $response = Invoke-WebRequest -Method POST -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/datasets/$($detail.id)/refreshes" -Headers $headers -Body '{"type":"Full","commitMode":"transactional"}' -UseBasicParsing
+                $response = Invoke-PbiApi -Method POST -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/datasets/$($detail.id)/refreshes" -Body '{"type":"Full","commitMode":"transactional"}' -ReturnResponse
                 $locationUrl = [string]$response.Headers["Location"]
                 if ([string]::IsNullOrWhiteSpace($locationUrl)) { throw "Power BI accepted the request without a Location header." }
                 $detail.requestId = ($locationUrl -split '/')[-1]
@@ -335,7 +401,7 @@ try {
 
             foreach ($detail in @($modelDetails | Where-Object { -not (Test-TerminalModelStatus $_.status) })) {
                 try {
-                    $state = Invoke-RestMethod -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/datasets/$($detail.id)/refreshes/$($detail.requestId)" -Headers $headers
+                    $state = Invoke-PbiApi -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups/$($detail.workspaceId)/datasets/$($detail.id)/refreshes/$($detail.requestId)"
                     switch ([string]$state.status) {
                         "Completed" {
                             $detail.status = "Succeeded"

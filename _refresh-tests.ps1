@@ -94,7 +94,7 @@ Assert ($failedEmail.HtmlBody -match "Short failure") "Failure message should ap
 
 $template = Get-Content -LiteralPath (Join-Path $PSScriptRoot "_refresh-worker-template.ps1") -Raw
 $testPayload = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('{"WorkspaceId":"00000000-0000-0000-0000-000000000000","DataflowIds":[],"SemanticModels":[],"NotificationRecipients":[],"EmailDryRun":true}'))
-$generated = $template.Replace("{{StatusFile}}", "C:\temp\status.json").Replace("{{LogsDir}}", "C:\temp\logs").Replace("{{EmailModule}}", "C:\temp\refresh-email.ps1").Replace("{{Token}}", "test-token").Replace("{{RefreshPayload}}", $testPayload)
+$generated = $template.Replace("{{StatusFile}}", "C:\temp\status.json").Replace("{{LogsDir}}", "C:\temp\logs").Replace("{{EmailModule}}", "C:\temp\refresh-email.ps1").Replace("{{TokenFile}}", "C:\temp\.token").Replace("{{Token}}", "test-token").Replace("{{RefreshPayload}}", $testPayload)
 Assert ($generated -notmatch '\{\{') "Generated worker should not contain unresolved placeholders"
 $workerTokens = $null
 $workerErrors = $null
@@ -103,5 +103,13 @@ Assert ($workerErrors.Count -eq 0) "Generated worker should parse"
 Assert ($template -match 'Where-Object \{ -not \(Test-TerminalModelStatus') "Worker should continue polling non-terminal semantic models"
 Assert ($template -match 'Complete-Notification') "Worker should run one final notification step"
 Assert ($serverSource -notmatch 'graph\.microsoft\.com') "Graph must not be introduced into the Power BI token path"
+
+Assert ($serverSource -match 'function Test-TokenUsable') "Server must be able to judge whether a cached token is still usable"
+Assert ($serverSource -match 'Test-TokenUsable \$global:cachedToken') "A cached token must not be returned without an expiry check"
+$workerUsesWrapper = [regex]::Matches($template, 'Invoke-PbiApi -Method (GET|POST) -Uri "https://api\.powerbi\.com').Count
+$barePowerBiCalls = [regex]::Matches($template, 'Invoke-(RestMethod|WebRequest) -Method (GET|POST) -Uri "https://api\.powerbi\.com').Count
+Assert ($workerUsesWrapper -ge 8) "Worker should route its Power BI calls through Invoke-PbiApi"
+Assert ($barePowerBiCalls -eq 0) "No Power BI call should bypass the token-recovery wrapper"
+Assert ($template -match 'Update-TokenFromFile') "Worker should be able to reload a fresh token mid-refresh"
 
 Write-Host "Refresh contract tests OK"

@@ -34,6 +34,9 @@ try {
 }
 $global:cachedToken = $null
 $tokenFile = Join-Path $scriptDir ".token"
+# Treat a cached token as spent this many minutes before it expires. Power BI answers a
+# spent bearer token with HTTP 403, which looks identical to a permissions failure.
+$tokenExpiryMarginMinutes = 5
 
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host "  Power BI Dashboard Control Panel" -ForegroundColor Cyan
@@ -45,21 +48,45 @@ Write-Host ""
 # ============================================================
 # Helpers
 # ============================================================
+function Test-TokenUsable {
+    param([AllowNull()][string]$Candidate)
+
+    if ([string]::IsNullOrWhiteSpace($Candidate)) { return $false }
+    try {
+        $payload = $Candidate.Split('.')[1].Replace('-', '+').Replace('_', '/')
+        switch ($payload.Length % 4) {
+            2 { $payload += '==' }
+            3 { $payload += '=' }
+        }
+        $claims = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payload)) | ConvertFrom-Json
+        return ([DateTimeOffset]::FromUnixTimeSeconds([long]$claims.exp) -gt (Get-Date).ToUniversalTime().AddMinutes($tokenExpiryMarginMinutes))
+    } catch {
+        return $false
+    }
+}
+
 function Get-Token {
     param([switch]$Interactive)
 
     if (-not $global:msalAvailable) { throw "MSAL.PS not installed" }
-    if ($global:cachedToken) { return $global:cachedToken }
+    if ($global:cachedToken -and (Test-TokenUsable $global:cachedToken)) { return $global:cachedToken }
+    $global:cachedToken = $null
 
     try {
         $t = Get-MsalToken -ClientId $ClientId -TenantId "common" -Scopes $PowerBiScope -Silent -ErrorAction Stop
         $global:cachedToken = $t.AccessToken
     } catch { }
 
+    if ($global:cachedToken) {
+        # A refresh worker may outlive the token that launched it and reloads this file.
+        @{ Token = $global:cachedToken; Saved = (Get-Date -Format "o") } | ConvertTo-Json | Set-Content -LiteralPath $tokenFile
+    }
+
     if (-not $global:cachedToken -and (Test-Path -LiteralPath $tokenFile)) {
         try {
             $saved = Get-Content -LiteralPath $tokenFile -Raw | ConvertFrom-Json
             if (-not $saved.Token) { throw "Token file is empty" }
+            if (-not (Test-TokenUsable $saved.Token)) { throw "Saved token has expired" }
             $headers = @{ Authorization = "Bearer $($saved.Token)" }
             Invoke-RestMethod -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups" -Headers $headers -TimeoutSec 10 -ErrorAction Stop | Out-Null
             $global:cachedToken = $saved.Token
@@ -517,6 +544,7 @@ while ($listener.IsListening) {
                 $workerScript = $workerScript.Replace("{{StatusFile}}", $statusFile)
                 $workerScript = $workerScript.Replace("{{LogsDir}}", $logsDir)
                 $workerScript = $workerScript.Replace("{{EmailModule}}", $emailModulePath)
+                $workerScript = $workerScript.Replace("{{TokenFile}}", $tokenFile)
                 $workerScript = $workerScript.Replace("{{RefreshPayload}}", $payloadBase64)
                 $workerScript = $workerScript.Replace("{{Token}}", $tokenForWorker)
 
