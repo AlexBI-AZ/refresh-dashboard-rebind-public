@@ -77,3 +77,24 @@ function Test-PartitionRefreshTerminalStatus {
     return @("Completed", "Failed", "Cancelled", "Disabled") -contains $status -or
         @("Completed", "Failed", "Cancelled", "Disabled") -contains $extendedStatus
 }
+
+function Update-PartitionRefreshStateFromHistory {
+    param($State, $History)
+
+    $entry = @($History.value) | Where-Object {
+        [string]$_.requestId -eq [string]$State.requestId
+    } | Select-Object -First 1
+    if (-not $entry -or -not (@("Completed", "Failed", "Cancelled", "Disabled") -contains [string]$entry.status)) {
+        return $false
+    }
+
+    $State.status = [string]$entry.status
+    $State.extendedStatus = [string]$entry.status
+    if ($entry.startTime) { $State.startTime = [string]$entry.startTime }
+    if ($entry.endTime) { $State.endTime = [string]$entry.endTime }
+    $State.objects = @()
+    $State.messages = @()
+    if ($entry.serviceExceptionJson) { $State.messages = @([string]$entry.serviceExceptionJson) }
+    $State | Add-Member -NotePropertyName statusSource -NotePropertyValue "Refresh history" -Force
+    return $true
+}

@@ -799,6 +799,8 @@ let partitionRefreshProfiles = [];
 let selectedPartitionRefreshId = null;
 let partitionRefreshPolling = null;
 let partitionRefreshSubmitting = false;
+let partitionRefreshViewSuppressed = false;
+let partitionRefreshViewGeneration = 0;
 
 // ============================================================
 // Init
@@ -893,6 +895,7 @@ async function authenticateRefresh() {
     const data = await resp.json();
     if (!resp.ok || !data.ok) throw new Error(data.error || 'Authentication failed');
     await checkAuth();
+    pollPartitionRefreshStatus();
   } catch (e) {
     message.textContent = 'Authentication failed: ' + e.message;
     button.disabled = false;
@@ -1458,14 +1461,24 @@ function selectPartitionRefreshProfile(name) {
   document.getElementById('btnDeletePartitionRefresh').disabled = false;
   renderPartitionRefreshProfileList();
   if (currentTab === 'partition-refresh') document.getElementById('pageTitle').textContent = name;
+  if (partitionRefreshViewSuppressed) {
+    partitionRefreshViewSuppressed = false;
+    partitionRefreshViewGeneration++;
+    pollPartitionRefreshStatus();
+  }
 }
 
 function newPartitionRefreshProfile() {
+  partitionRefreshViewSuppressed = true;
+  partitionRefreshViewGeneration++;
+  if (partitionRefreshPolling) { clearInterval(partitionRefreshPolling); partitionRefreshPolling = null; }
   selectedPartitionRefreshId = null;
   localStorage.removeItem('partition-refresh-selected');
   ['partitionProfileName','partitionWorkspaceId','partitionDatasetId','partitionTableName','partitionNames'].forEach(function(id) { document.getElementById(id).value = ''; });
   document.getElementById('btnDeletePartitionRefresh').disabled = true;
   document.getElementById('pageTitle').textContent = 'Partition Refresh';
+  document.getElementById('partitionRefreshState').textContent = 'No partition refresh request has been loaded. Status checks use GET and never resubmit.';
+  document.getElementById('logsPartitionRefresh').innerHTML = '<div class="empty-state"><span>Partition refresh status and history will appear here</span></div>';
   renderPartitionRefreshProfileList();
 }
 
@@ -1536,9 +1549,9 @@ async function startPartitionRefresh() {
     const result = await resp.json();
     if (!resp.ok || !result.ok) { addPartitionRefreshLog(result.error || 'Submission failed.', 'error'); return; }
     addPartitionRefreshLog('Accepted as request ' + result.requestId + '. Processing continues server-side.', 'success');
+    partitionRefreshViewSuppressed = false;
+    partitionRefreshViewGeneration++;
     pollPartitionRefreshStatus();
-    if (partitionRefreshPolling) clearInterval(partitionRefreshPolling);
-    partitionRefreshPolling = setInterval(pollPartitionRefreshStatus, 10000);
   } catch (e) { addPartitionRefreshLog('Connection error: ' + e.message, 'error'); }
   finally { partitionRefreshSubmitting = false; button.disabled = false; }
 }
@@ -1555,23 +1568,37 @@ function renderPartitionRefreshState(state) {
     if (attempt && Array.isArray(attempt.messages)) messages.push.apply(messages, attempt.messages);
   });
   const messageHtml = messages.length ? '<br><strong>Engine messages:</strong> ' + escHtml(JSON.stringify(messages)) : '';
+  const sourceHtml = state.statusSource === 'Refresh history' ? '<br>Final status from refresh history. Partition details are unavailable there.' : '';
   document.getElementById('partitionRefreshState').innerHTML =
     '<strong>Request ID:</strong> ' + escHtml(state.requestId || '') + '<br>' +
     '<strong>Submitted:</strong> ' + escHtml(state.submittedAt || '') + ' &nbsp; <strong>Status:</strong> ' + escHtml(state.status || '') +
     ' &nbsp; <strong>Extended:</strong> ' + escHtml(state.extendedStatus || '') + '<br>' +
     '<strong>Start:</strong> ' + escHtml(state.startTime || '') + ' &nbsp; <strong>End:</strong> ' + escHtml(state.endTime || '') +
-    ' &nbsp; <strong>Attempts:</strong> ' + attempts.length + objectHtml + messageHtml +
+    ' &nbsp; <strong>Attempts:</strong> ' + attempts.length + objectHtml + messageHtml + sourceHtml +
     '<br>Checking status uses GET only. The accepted request continues in Power BI Service if this dashboard disconnects.';
 }
 
 async function pollPartitionRefreshStatus() {
+  if (partitionRefreshViewSuppressed) return;
+  const generation = partitionRefreshViewGeneration;
   try {
     const resp = await fetch(API + '/api/partition-refresh/status');
     const result = await resp.json();
+    if (partitionRefreshViewSuppressed || generation !== partitionRefreshViewGeneration) return;
     const state = result.state || result;
     if (state && state.requestId) renderPartitionRefreshState(state);
-    if (result.authenticationRequired) addPartitionRefreshLog(result.error, 'warn');
-    if (state && !state.running && partitionRefreshPolling) { clearInterval(partitionRefreshPolling); partitionRefreshPolling = null; }
+    if (result.authenticationRequired) {
+      document.getElementById('partitionRefreshState').innerHTML += '<br><strong>Last known status. Authenticate to verify the current state.</strong>';
+      addPartitionRefreshLog(result.error, 'warn');
+      if (partitionRefreshPolling) { clearInterval(partitionRefreshPolling); partitionRefreshPolling = null; }
+    } else {
+      if (!resp.ok) document.getElementById('partitionRefreshState').innerHTML += '<br><strong>Status not verified: ' + escHtml(result.error || 'Service request failed.') + '</strong>';
+      if (state && state.running && !partitionRefreshPolling) {
+        partitionRefreshPolling = setInterval(pollPartitionRefreshStatus, 10000);
+      } else if (state && !state.running && partitionRefreshPolling) {
+        clearInterval(partitionRefreshPolling); partitionRefreshPolling = null;
+      }
+    }
   } catch (e) { }
 }
 

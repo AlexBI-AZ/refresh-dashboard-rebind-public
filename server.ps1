@@ -639,11 +639,6 @@ while ($listener.IsListening) {
                 if ($global:partitionSubmissionInProgress) {
                     $response.StatusCode = 409; Send-Json $response @{ ok = $false; error = "A partition refresh submission is already in progress" }; continue
                 }
-                $existing = if (Test-Path -LiteralPath $partitionRefreshStatusFile) { try { Get-Content -LiteralPath $partitionRefreshStatusFile -Raw | ConvertFrom-Json } catch { $null } } else { $null }
-                if ($existing -and $existing.running) {
-                    $response.StatusCode = 409; Send-Json $response @{ ok = $false; error = "The current partition refresh is still in progress" }; continue
-                }
-
                 $reader = New-Object System.IO.StreamReader($request.InputStream)
                 try { $body = $reader.ReadToEnd() | ConvertFrom-Json } catch {
                     $reader.Close(); $response.StatusCode = 400; Send-Json $response @{ ok = $false; error = "Invalid request JSON" }; continue
@@ -655,6 +650,21 @@ while ($listener.IsListening) {
                 }
                 try { $token = Get-Token } catch {
                     $response.StatusCode = 401; Send-Json $response @{ ok = $false; error = "Partition Refresh requires authentication. Use Authenticate for Refresh first." }; continue
+                }
+
+                $existing = if (Test-Path -LiteralPath $partitionRefreshStatusFile) { try { Get-Content -LiteralPath $partitionRefreshStatusFile -Raw | ConvertFrom-Json } catch { $null } } else { $null }
+                if ($existing -and $existing.running) {
+                    try {
+                        $historyUri = "https://api.powerbi.com/v1.0/myorg/groups/$($existing.workspaceId)/datasets/$($existing.datasetId)/refreshes?`$top=60"
+                        $history = Invoke-RestMethod -Method GET -Uri $historyUri -Headers @{ Authorization = "Bearer $token" } -ErrorAction Stop
+                        if (Update-PartitionRefreshStateFromHistory $existing $history) {
+                            $existing.running = $false
+                            $existing | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $partitionRefreshStatusFile -Encoding UTF8
+                        }
+                    } catch { }
+                    if ($existing.running) {
+                        $response.StatusCode = 409; Send-Json $response @{ ok = $false; error = "The current partition refresh is still in progress. Check its status before starting another request." }; continue
+                    }
                 }
 
                 $global:partitionSubmissionInProgress = $true
@@ -690,19 +700,29 @@ while ($listener.IsListening) {
                     $response.StatusCode = 401
                     Send-Json $response @{ ok = $false; authenticationRequired = $true; error = "Authenticate again to view status. The accepted refresh continues server-side."; state = $state }; continue
                 }
+                $headers = @{ Authorization = "Bearer $token" }
+                $detailsError = ""
                 try {
-                    $headers = @{ Authorization = "Bearer $token" }
                     $uri = "https://api.powerbi.com/v1.0/myorg/groups/$($state.workspaceId)/datasets/$($state.datasetId)/refreshes/$($state.requestId)"
                     $remote = Invoke-RestMethod -Method GET -Uri $uri -Headers $headers -ErrorAction Stop
                     foreach ($property in @("status", "extendedStatus", "startTime", "endTime", "attempts", "objects", "messages")) {
                         if ($null -ne $remote.$property) { $state.$property = $remote.$property }
                     }
-                    $state.running = -not (Test-PartitionRefreshTerminalStatus $state)
-                    $state | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $partitionRefreshStatusFile -Encoding UTF8
-                    Send-Json $response $state
                 } catch {
-                    $response.StatusCode = 502; Send-Json $response @{ ok = $false; error = "Could not retrieve partition refresh status: $($_.Exception.Message)"; state = $state }
+                    $detailsError = $_.Exception.Message
                 }
+                if (-not (Test-PartitionRefreshTerminalStatus $state)) {
+                    try {
+                        $historyUri = "https://api.powerbi.com/v1.0/myorg/groups/$($state.workspaceId)/datasets/$($state.datasetId)/refreshes?`$top=60"
+                        $history = Invoke-RestMethod -Method GET -Uri $historyUri -Headers $headers -ErrorAction Stop
+                        [void](Update-PartitionRefreshStateFromHistory $state $history)
+                    } catch { }
+                }
+                $state.running = -not (Test-PartitionRefreshTerminalStatus $state)
+                $state | ConvertTo-Json -Depth 15 | Set-Content -LiteralPath $partitionRefreshStatusFile -Encoding UTF8
+                if ($detailsError -and $state.running) {
+                    $response.StatusCode = 502; Send-Json $response @{ ok = $false; error = "Could not retrieve partition refresh status: $detailsError"; state = $state }
+                } else { Send-Json $response $state }
             }
             "^/api/partition-refresh/history$" {
                 if ($method -ne "GET") { $response.StatusCode = 405; continue }

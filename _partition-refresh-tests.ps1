@@ -41,4 +41,17 @@ Assert ($statusBlock -notmatch '-Method POST') "Status route must not use POST"
 Assert ($historyBlock -match 'Invoke-RestMethod -Method GET') "History route must use GET"
 Assert ($historyBlock -notmatch '-Method POST') "History route must not use POST"
 
+$stale = '{"requestId":"request-1","status":"Unknown","extendedStatus":"InProgress","running":true,"startTime":"","endTime":"","objects":[{"partition":"2019","status":"InProgress"}],"messages":[]}' | ConvertFrom-Json
+$history = '{"value":[{"requestId":"different","status":"Failed"},{"requestId":"request-1","status":"Failed","endTime":"2026-10-13T13:00:00Z","serviceExceptionJson":"{\"errorCode\":\"RefreshFailed\"}"}]}' | ConvertFrom-Json
+Assert (Update-PartitionRefreshStateFromHistory $stale $history) "Matching failed history entry was ignored"
+Assert (Test-PartitionRefreshTerminalStatus $stale) "Failed history did not make the request terminal"
+Assert ($stale.status -eq 'Failed' -and $stale.extendedStatus -eq 'Failed') "Terminal status was not reflected in both fields"
+Assert ($stale.objects.Count -eq 0) "Stale in-progress partition rows were retained"
+Assert ($stale.messages.Count -eq 1 -and $stale.endTime) "Failure details were lost"
+Assert ($stale.statusSource -eq 'Refresh history') "History source was not recorded"
+
+$unmatched = '{"requestId":"current","status":"Unknown","extendedStatus":"InProgress","objects":[],"messages":[]}' | ConvertFrom-Json
+Assert (-not (Update-PartitionRefreshStateFromHistory $unmatched $history)) "Another request changed the current state"
+Assert ($unmatched.status -eq 'Unknown') "Unmatched history altered the current status"
+
 Write-Host "Partition refresh contract tests OK"
