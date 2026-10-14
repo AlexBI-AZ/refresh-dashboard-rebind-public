@@ -15,6 +15,7 @@ function element(id) {
 }
 let pendingFetch;
 let nextInterval = 0;
+let nextCheckedTime = 0;
 const activeIntervals = new Set();
 const context = vm.createContext({
   window: { location: { origin: 'http://localhost' } },
@@ -23,6 +24,10 @@ const context = vm.createContext({
   fetch: () => new Promise(resolve => { pendingFetch = resolve; }),
   setInterval: () => { activeIntervals.add(++nextInterval); return nextInterval; },
   clearInterval: id => activeIntervals.delete(id),
+  Date: class {
+    toLocaleString() { return 'check-' + ++nextCheckedTime; }
+    toLocaleTimeString() { return '08:00:00'; }
+  },
   console
 });
 vm.runInContext(script, context);
@@ -42,9 +47,23 @@ async function run() {
   pendingFetch({ json: async () => ({ requestId: 'current', running: true, status: 'Unknown' }), ok: true });
   await runningPoll;
   assert.equal(activeIntervals.size, 1);
+  assert.match(element('partitionRefreshState').innerHTML, /Last checked:<\/strong> check-1/);
+
+  const unchangedPoll = vm.runInContext('pollPartitionRefreshStatus()', context);
+  pendingFetch({ json: async () => ({ requestId: 'current', running: true, status: 'Unknown' }), ok: true });
+  await unchangedPoll;
+  assert.match(element('partitionRefreshState').innerHTML, /Last checked:<\/strong> check-2/);
+
+  const failedPoll = vm.runInContext('pollPartitionRefreshStatus()', context);
+  pendingFetch({ json: async () => ({ error: 'Service unavailable', state: { requestId: 'current', running: true, status: 'Unknown' } }), ok: false });
+  await failedPoll;
+  assert.match(element('partitionRefreshState').innerHTML, /Last checked:<\/strong> check-2/);
+  assert.match(element('partitionRefreshState').innerHTML, /Status not verified/);
 
   vm.runInContext('newPartitionRefreshProfile()', context);
   assert.equal(activeIntervals.size, 0);
+  assert.equal(vm.runInContext('partitionRefreshLastChecked', context), '');
+  assert.doesNotMatch(element('partitionRefreshState').textContent, /Last checked/);
   vm.runInContext('partitionRefreshViewSuppressed = false', context);
 
   const terminalPoll = vm.runInContext('pollPartitionRefreshStatus()', context);
@@ -52,6 +71,7 @@ async function run() {
   await terminalPoll;
   assert.equal(activeIntervals.size, 0);
   assert.match(element('partitionRefreshState').innerHTML, /Failed/);
+  assert.match(element('partitionRefreshState').innerHTML, /Last checked:<\/strong> check-3/);
 
   const unauthenticatedPoll = vm.runInContext('pollPartitionRefreshStatus()', context);
   pendingFetch({ json: async () => ({ authenticationRequired: true, error: 'Authenticate again', state: { requestId: 'current', running: true, status: 'Unknown' } }), ok: false });

@@ -801,6 +801,8 @@ let partitionRefreshPolling = null;
 let partitionRefreshSubmitting = false;
 let partitionRefreshViewSuppressed = false;
 let partitionRefreshViewGeneration = 0;
+let partitionRefreshLastChecked = '';
+let partitionRefreshLastCheckedRequestId = '';
 
 // ============================================================
 // Init
@@ -1471,6 +1473,8 @@ function selectPartitionRefreshProfile(name) {
 function newPartitionRefreshProfile() {
   partitionRefreshViewSuppressed = true;
   partitionRefreshViewGeneration++;
+  partitionRefreshLastChecked = '';
+  partitionRefreshLastCheckedRequestId = '';
   if (partitionRefreshPolling) { clearInterval(partitionRefreshPolling); partitionRefreshPolling = null; }
   selectedPartitionRefreshId = null;
   localStorage.removeItem('partition-refresh-selected');
@@ -1551,6 +1555,8 @@ async function startPartitionRefresh() {
     addPartitionRefreshLog('Accepted as request ' + result.requestId + '. Processing continues server-side.', 'success');
     partitionRefreshViewSuppressed = false;
     partitionRefreshViewGeneration++;
+    partitionRefreshLastChecked = '';
+    partitionRefreshLastCheckedRequestId = result.requestId;
     pollPartitionRefreshStatus();
   } catch (e) { addPartitionRefreshLog('Connection error: ' + e.message, 'error'); }
   finally { partitionRefreshSubmitting = false; button.disabled = false; }
@@ -1569,12 +1575,13 @@ function renderPartitionRefreshState(state) {
   });
   const messageHtml = messages.length ? '<br><strong>Engine messages:</strong> ' + escHtml(JSON.stringify(messages)) : '';
   const sourceHtml = state.statusSource === 'Refresh history' ? '<br>Final status from refresh history. Partition details are unavailable there.' : '';
+  const checkedHtml = partitionRefreshLastChecked ? '<br><strong>Last checked:</strong> ' + escHtml(partitionRefreshLastChecked) : '';
   document.getElementById('partitionRefreshState').innerHTML =
     '<strong>Request ID:</strong> ' + escHtml(state.requestId || '') + '<br>' +
     '<strong>Submitted:</strong> ' + escHtml(state.submittedAt || '') + ' &nbsp; <strong>Status:</strong> ' + escHtml(state.status || '') +
     ' &nbsp; <strong>Extended:</strong> ' + escHtml(state.extendedStatus || '') + '<br>' +
     '<strong>Start:</strong> ' + escHtml(state.startTime || '') + ' &nbsp; <strong>End:</strong> ' + escHtml(state.endTime || '') +
-    ' &nbsp; <strong>Attempts:</strong> ' + attempts.length + objectHtml + messageHtml + sourceHtml +
+    ' &nbsp; <strong>Attempts:</strong> ' + attempts.length + objectHtml + messageHtml + sourceHtml + checkedHtml +
     '<br>Checking status uses GET only. The accepted request continues in Power BI Service if this dashboard disconnects.';
 }
 
@@ -1586,7 +1593,14 @@ async function pollPartitionRefreshStatus() {
     const result = await resp.json();
     if (partitionRefreshViewSuppressed || generation !== partitionRefreshViewGeneration) return;
     const state = result.state || result;
-    if (state && state.requestId) renderPartitionRefreshState(state);
+    if (state && state.requestId) {
+      if (state.requestId !== partitionRefreshLastCheckedRequestId) {
+        partitionRefreshLastChecked = '';
+        partitionRefreshLastCheckedRequestId = state.requestId;
+      }
+      if (resp.ok) partitionRefreshLastChecked = new Date().toLocaleString();
+      renderPartitionRefreshState(state);
+    }
     if (result.authenticationRequired) {
       document.getElementById('partitionRefreshState').innerHTML += '<br><strong>Last known status. Authenticate to verify the current state.</strong>';
       addPartitionRefreshLog(result.error, 'warn');
