@@ -30,9 +30,10 @@ The following behavior is required:
 3. Rebind is fully usable when the authentication state is `Not Authenticated`.
 4. Authentication warnings and status badges are hidden while the Rebind tab is active.
 5. Authentication is requested only after the user selects **Authenticate for Refresh** on the Refresh tab.
-6. A cached MSAL token or valid `.token` file may be reused for Refresh.
-7. If no valid token exists, the device-code flow is shown in the server console.
+6. All Power BI sign-in goes through `runtime\powerbi-auth.ps1`, shared by the server and the refresh worker, so one run never changes identity. Two equal options are chosen per PC: device code (for people who start refreshes by hand) and a certificate (for PCs that run refreshes unattended). `POWERBI_REFRESH_AUTH_MODE` selects one explicitly; otherwise the certificate is used when its three variables are set.
+7. With device code, the code is shown in the server console after **Authenticate for Refresh**; the sign-in is kept in the module's DPAPI-protected cache, not in a `.token` file. With a certificate, no user interaction is needed.
 8. If MSAL.PS is unavailable, Refresh explains how to install it while Rebind remains available.
+9. `setup.bat` / `setup.ps1` set up one Windows user without admin rights and are safe to run again: unblock files, check Windows PowerShell 5.1 and Edge, install MSAL.PS without prompts, choose the sign-in (device code sets nothing; certificate creates a non-exportable key in `Cert:\CurrentUser\My`, sets the four variables and exports only the public `.cer`; a `.pfx` is never created or copied), optionally save the flow URL only as the user variable `REFRESH_EMAIL_WEBHOOK_URL`, create shortcuts, run a read-only readiness check and open the panel. `-CheckOnly` and `-DryRun` change nothing.
 
 ## 3. Rebind input requirements
 
@@ -84,8 +85,8 @@ The summary must show:
 
 The user must receive two explicit choices:
 
-- **Continue with Apply** — proceed with replacement and verification.
-- **Do not continue** — stop without changing files.
+- **Continue with Apply** - proceed with replacement and verification.
+- **Do not continue** - stop without changing files.
 
 Choosing **Do not continue** must:
 
@@ -144,7 +145,7 @@ On failure, the user must be told that no automatic retry occurred and that the 
 - Profile names and values displayed in generated HTML must not be executable as inline JavaScript.
 - Selecting, creating, deleting, or editing a Rebind profile invalidates any previous Scan decision.
 - Deleting a Rebind profile must reset the form to a safe blank mapping.
-- `.token`, local profile files, status files, logs, generated worker scripts, and `.env*` files must remain excluded from Git.
+- `.token`, status files, logs, and generated worker scripts must remain excluded from Git.
 
 ## 10. Acceptance checks
 
@@ -165,9 +166,9 @@ The implementation is acceptable only when all of the following pass:
 
 ## 11. Project files implementing these requirements
 
-- `launch.bat` — starts the dashboard without authentication setup.
-- `server.ps1` — local HTTP API, optional Refresh authentication, Rebind validation, worker coordination, replacement, and verification.
-- `index.html` — Refresh/Rebind UI, authentication action, technical logs, and plain-language summaries.
-- `README.md` — user instructions.
-- `setup-auth.ps1` — optional Refresh authentication helper.
+- `launch.bat` - starts the dashboard without authentication setup.
+- `server.ps1` - local HTTP API, optional Refresh authentication, Rebind validation, worker coordination, replacement, and verification.
+- `index.html` - Refresh/Rebind UI, authentication action, technical logs, and plain-language summaries.
+- `README.md` - user instructions.
+- `setup.bat` and `setup.ps1` - per-user setup and readiness check; `_setup-tests.ps1` tests them offline.
 

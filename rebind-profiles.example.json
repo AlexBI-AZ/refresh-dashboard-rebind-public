@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "name": "Sales Dashboard: DEV to TEST (example)",
+    "reportPath": "C:\\Projects\\SalesDashboard",
+    "mappings": [
+      {
+        "id": 1,
+        "type": "Workspace",
+        "fromId": "00000000-0000-0000-0000-000000000004",
+        "toId": "00000000-0000-0000-0000-000000000001"
+      },
+      {
+        "id": 2,
+        "type": "Dataflow",
+        "fromId": "00000000-0000-0000-0000-000000000005",
+        "toId": "00000000-0000-0000-0000-000000000002"
+      }
+    ]
+  }
+]

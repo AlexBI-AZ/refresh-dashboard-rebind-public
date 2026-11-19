@@ -1,6 +1,7 @@
 param(
     [int]$Port = 8765,
-    [switch]$NoBrowser
+    [switch]$NoBrowser,
+    [switch]$AppWindow
 )
 
 $ErrorActionPreference = "SilentlyContinue"
@@ -8,13 +9,12 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $profilesFile = Join-Path $scriptDir "profiles.json"
 $htmlFile = Join-Path $scriptDir "index.html"
 $statusFile = Join-Path $scriptDir "refresh-status.json"
+$workerFile = Join-Path $scriptDir "refresh-worker.json"
 $rebindStatusFile = Join-Path $scriptDir "rebind-status.json"
 $rebindProfilesFile = Join-Path $scriptDir "rebind-profiles.json"
 $partitionRefreshProfilesFile = Join-Path $scriptDir "partition-refresh-profiles.json"
 $partitionRefreshStatusFile = Join-Path $scriptDir "partition-refresh-status.json"
 $logsDir = Join-Path $scriptDir "logs"
-$ClientId = "1950a258-227b-4e31-a9cf-717495945fc2"
-$PowerBiScope = "https://analysis.windows.net/powerbi/api/.default"
 . (Join-Path $scriptDir "partition-refresh.ps1")
 $global:partitionSubmissionInProgress = $false
 
@@ -25,6 +25,25 @@ if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -Fo
 # Optional authentication (Refresh only)
 # ============================================================
 $global:msalAvailable = $false
+# Started from a PowerShell 7 shell (for example through Start-Process or a .bat file),
+# Windows PowerShell inherits PowerShell 7's PSModulePath. That path misses the Windows
+# PowerShell user module folder, where MSAL.PS is usually installed, and lists PowerShell 7's
+# own copies of built-in modules, which break MSAL.PS's import. Rebuild it with the Windows
+# PowerShell folders first and the PowerShell 7 folders removed; worker processes inherit it.
+if ($PSVersionTable.PSEdition -ne 'Core') {
+    $windowsPowerShellModuleDirs = @(
+        (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell\Modules'),
+        (Join-Path $env:ProgramFiles 'WindowsPowerShell\Modules'),
+        (Join-Path $PSHOME 'Modules')
+    )
+    $otherModuleDirs = @($env:PSModulePath -split ';' | Where-Object {
+        $_ -and
+        ($windowsPowerShellModuleDirs -notcontains $_.TrimEnd('\')) -and
+        $_ -notmatch '\\PowerShell\\(Modules|7)' -and
+        $_ -notmatch '\\Microsoft\.PowerShell_[^\\]+\\Modules'
+    })
+    $env:PSModulePath = (@($windowsPowerShellModuleDirs) + $otherModuleDirs) -join ';'
+}
 try {
     Import-Module MSAL.PS -Force -ErrorAction Stop
     $global:msalAvailable = $true
@@ -32,14 +51,24 @@ try {
     Write-Host "MSAL.PS is not installed. Rebind is ready; Refresh authentication is unavailable." -ForegroundColor Yellow
     Write-Host "For Refresh, install with: Install-Module -Name MSAL.PS -Scope CurrentUser -Force" -ForegroundColor Gray
 }
+# All Power BI sign-in goes through runtime\powerbi-auth.ps1, the same module the refresh
+# worker renews its token with: the certificate (service principal) when it is configured,
+# otherwise a device-code sign-in kept in that module's encrypted cache. One run therefore
+# never switches identity between start and renewal.
+. (Join-Path $scriptDir "runtime\powerbi-auth.ps1")
+# Read-only lookups behind the Refresh tab's name pickers (workspaces, reports, semantic
+# models, dataflows, lineage). Same engine as the runner; see Invoke-CatalogRequest.
+. (Join-Path $scriptDir "runtime\refresh-catalog.ps1")
+$global:catalogWorkspaceCache = $null
 $global:cachedToken = $null
-$tokenFile = Join-Path $scriptDir ".token"
-# Treat a cached token as spent this many minutes before it expires. Power BI answers a
-# spent bearer token with HTTP 403, which looks identical to a permissions failure.
-$tokenExpiryMarginMinutes = 5
+$global:cachedTokenAt = $null
+$global:authContext = $null
+$global:authMode = ""
+$tokenRenewalAge = [TimeSpan]::FromMinutes(40)
 
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host "  Power BI Dashboard Control Panel" -ForegroundColor Cyan
+Write-Host "  by Alex Paraschakis" -ForegroundColor Gray
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Rebind starts without authentication. Authenticate from the Refresh tab only if needed." -ForegroundColor Green
@@ -48,63 +77,39 @@ Write-Host ""
 # ============================================================
 # Helpers
 # ============================================================
-function Test-TokenUsable {
-    param([AllowNull()][string]$Candidate)
-
-    if ([string]::IsNullOrWhiteSpace($Candidate)) { return $false }
-    try {
-        $payload = $Candidate.Split('.')[1].Replace('-', '+').Replace('_', '/')
-        switch ($payload.Length % 4) {
-            2 { $payload += '==' }
-            3 { $payload += '=' }
-        }
-        $claims = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($payload)) | ConvertFrom-Json
-        return ([DateTimeOffset]::FromUnixTimeSeconds([long]$claims.exp) -gt (Get-Date).ToUniversalTime().AddMinutes($tokenExpiryMarginMinutes))
-    } catch {
-        return $false
-    }
-}
-
 function Get-Token {
     param([switch]$Interactive)
 
     if (-not $global:msalAvailable) { throw "MSAL.PS not installed" }
-    if ($global:cachedToken -and (Test-TokenUsable $global:cachedToken)) { return $global:cachedToken }
+    if ($global:cachedToken -and $global:cachedTokenAt -and ((Get-Date) - $global:cachedTokenAt) -lt $tokenRenewalAge) {
+        return $global:cachedToken
+    }
     $global:cachedToken = $null
 
+    if (-not $global:authContext) {
+        $global:authContext = New-PowerBiAuthContext
+        $global:authMode = $global:authContext.Mode
+    }
+
     try {
-        $t = Get-MsalToken -ClientId $ClientId -TenantId "common" -Scopes $PowerBiScope -Silent -ErrorAction Stop
-        $global:cachedToken = $t.AccessToken
-    } catch { }
-
-    if ($global:cachedToken) {
-        # A refresh worker may outlive the token that launched it and reloads this file.
-        @{ Token = $global:cachedToken; Saved = (Get-Date -Format "o") } | ConvertTo-Json | Set-Content -LiteralPath $tokenFile
-    }
-
-    if (-not $global:cachedToken -and (Test-Path -LiteralPath $tokenFile)) {
-        try {
-            $saved = Get-Content -LiteralPath $tokenFile -Raw | ConvertFrom-Json
-            if (-not $saved.Token) { throw "Token file is empty" }
-            if (-not (Test-TokenUsable $saved.Token)) { throw "Saved token has expired" }
-            $headers = @{ Authorization = "Bearer $($saved.Token)" }
-            Invoke-RestMethod -Method GET -Uri "https://api.powerbi.com/v1.0/myorg/groups" -Headers $headers -TimeoutSec 10 -ErrorAction Stop | Out-Null
-            $global:cachedToken = $saved.Token
-        } catch {
-            $global:cachedToken = $null
+        $global:cachedToken = Get-PowerBiAccessToken -Context $global:authContext
+    } catch {
+        # Only device-code sign-in can ask a person; a certificate error is final.
+        if ($global:authContext.Mode -ne "delegated" -or -not $Interactive) {
+            if ($global:authContext.Mode -eq "delegated") { throw "Not authenticated" }
+            throw
         }
-    }
-
-    if (-not $global:cachedToken -and $Interactive) {
         Write-Host ""
-        Write-Host "Refresh authentication requested." -ForegroundColor Yellow
+        Write-Host "Device-code sign-in for Refresh (this PC does not use a certificate)." -ForegroundColor Yellow
         Write-Host "Use the device URL and code shown below. Rebind itself never requires this step." -ForegroundColor Yellow
-        $global:cachedToken = (Get-MsalToken -ClientId $ClientId -TenantId "common" -Scopes $PowerBiScope -DeviceCode -ErrorAction Stop).AccessToken
-        @{ Token = $global:cachedToken; Saved = (Get-Date -Format "o") } | ConvertTo-Json | Set-Content -LiteralPath $tokenFile
+        if ($AppWindow) { Show-ServerConsole }
+        $result = Get-MsalToken -PublicClientApplication $global:authContext.Client -Scopes $global:authContext.Scopes -DeviceCode -Timeout (New-TimeSpan -Minutes 10) -ErrorAction Stop
+        $global:cachedToken = [string]$result.AccessToken
         Write-Host "Authenticated. Refresh is ready." -ForegroundColor Green
     }
 
-    if (-not $global:cachedToken) { throw "Not authenticated" }
+    if ([string]::IsNullOrWhiteSpace($global:cachedToken)) { $global:cachedToken = $null; throw "Not authenticated" }
+    $global:cachedTokenAt = Get-Date
     return $global:cachedToken
 }
 
@@ -198,14 +203,83 @@ function Get-NormalizedRecipients {
     return [pscustomobject]@{ Ok = $true; Error = ""; Recipients = @($recipients) }
 }
 
+function Invoke-CatalogRequest {
+    # The read-only catalog endpoints. Returns @{ Status; Body } so the route only sends
+    # it. Every lookup is a GET against Power BI; nothing is started or changed.
+    #   GET  /api/catalog/workspaces[?refresh=1]          workspaces (cached 5 minutes)
+    #   GET  /api/catalog/items?workspaceId=<guid>        reports, semantic models, dataflows
+    #   GET  /api/catalog/upstream?workspaceId=&datasetId= a model and its upstream dataflows
+    #   POST /api/catalog/names {workspaceIds, dataflows, semanticModels}  names for saved IDs
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Method,
+        [AllowNull()][object]$Query,
+        [AllowNull()][object]$Body,
+        [Parameter(Mandatory = $true)][string]$Token
+    )
+
+    $reply = { param([int]$Status, [hashtable]$Content) @{ Status = $Status; Body = $Content } }
+    $routes = @{
+        "/api/catalog/workspaces" = "GET"
+        "/api/catalog/items" = "GET"
+        "/api/catalog/upstream" = "GET"
+        "/api/catalog/names" = "POST"
+    }
+    if (-not $routes.ContainsKey($Path)) { return & $reply 404 @{ ok = $false; error = "Unknown catalog request" } }
+    if ($Method -ne $routes[$Path]) { return & $reply 405 @{ ok = $false; error = "Method not allowed" } }
+    $workspaceId = if ($null -ne $Query) { ([string]$Query["workspaceId"]).Trim() } else { "" }
+    $datasetId = if ($null -ne $Query) { ([string]$Query["datasetId"]).Trim() } else { "" }
+    if ($Path -in @("/api/catalog/items", "/api/catalog/upstream") -and -not (Test-RefreshCatalogGuid $workspaceId)) {
+        return & $reply 400 @{ ok = $false; error = "workspaceId must be a valid GUID" }
+    }
+    if ($Path -eq "/api/catalog/upstream" -and -not (Test-RefreshCatalogGuid $datasetId)) {
+        return & $reply 400 @{ ok = $false; error = "datasetId must be a valid GUID" }
+    }
+
+    try {
+        Initialize-RefreshCatalog -Token $Token
+        switch ($Path) {
+            "/api/catalog/workspaces" {
+                $refresh = $null -ne $Query -and [string]$Query["refresh"] -eq "1"
+                $cache = $global:catalogWorkspaceCache
+                if ($refresh -or $null -eq $cache -or ((Get-Date) - $cache.At) -gt [TimeSpan]::FromMinutes(5)) {
+                    $cache = @{ At = Get-Date; Items = @(Get-RefreshCatalogWorkspaces) }
+                    $global:catalogWorkspaceCache = $cache
+                }
+                return & $reply 200 @{ ok = $true; workspaces = @($cache.Items); loadedAt = $cache.At.ToString("o") }
+            }
+            "/api/catalog/items" {
+                $items = Get-RefreshCatalogWorkspaceItems -WorkspaceId $workspaceId
+                return & $reply 200 @{ ok = $true; reports = @($items.reports); semanticModels = @($items.semanticModels); dataflows = @($items.dataflows); warnings = @($items.warnings) }
+            }
+            "/api/catalog/upstream" {
+                $upstream = Get-RefreshCatalogUpstream -WorkspaceId $workspaceId -DatasetId $datasetId
+                return & $reply 200 @{ ok = $true; model = $upstream.model; dataflows = @($upstream.dataflows); warnings = @($upstream.warnings) }
+            }
+            "/api/catalog/names" {
+                $names = Resolve-RefreshCatalogNames -WorkspaceIds @($Body.workspaceIds) -Dataflows @($Body.dataflows) -SemanticModels @($Body.semanticModels)
+                return & $reply 200 @{ ok = $true; workspaces = @($names.workspaces); dataflows = @($names.dataflows); semanticModels = @($names.semanticModels) }
+            }
+        }
+    } catch {
+        if (Test-RefreshAuthorizationError $_) { return & $reply 401 @{ ok = $false; error = "Power BI rejected the sign-in. Sign in again." } }
+        return & $reply 502 @{ ok = $false; error = "Power BI lookup failed: $(Get-RefreshShortError $_)" }
+    }
+}
+
 function Get-RefreshRequest {
     param($Body)
 
+    # The dataflow workspace is needed only when dataflows are listed: a model-only run
+    # (the Refresh tab's "Model only" box) sends none, and each semantic model carries
+    # its own workspace. A workspace that is given must still be a valid GUID.
     $workspaceId = ([string]$Body.WorkspaceId).Trim()
     $workspaceGuid = [Guid]::Empty
-    if (-not [Guid]::TryParse($workspaceId, [ref]$workspaceGuid)) {
+    $workspaceValid = [Guid]::TryParse($workspaceId, [ref]$workspaceGuid)
+    if (-not $workspaceValid -and $workspaceId) {
         return [pscustomobject]@{ Ok = $false; Error = "Workspace ID must be a valid GUID" }
     }
+    if ($workspaceValid) { $workspaceId = $workspaceGuid.ToString() }
 
     $rawDataflows = if ($Body.DataflowIds) { @($Body.DataflowIds) } elseif ($Body.DataflowId) { @($Body.DataflowId) } else { @() }
     $dataflows = @()
@@ -222,8 +296,26 @@ function Get-RefreshRequest {
             $dataflows += $dataflowGuid.ToString()
         }
     }
-    if ($dataflows.Count -eq 0) {
-        return [pscustomobject]@{ Ok = $false; Error = "At least one dataflow is required" }
+    if ($dataflows.Count -gt 0 -and -not $workspaceValid) {
+        return [pscustomobject]@{ Ok = $false; Error = "Workspace ID must be a valid GUID when dataflows are listed" }
+    }
+
+    # Dataflows chosen by name can live in different workspaces, so they may also come as
+    # Dataflows = [{WorkspaceId, DataflowId}]; an entry without a workspace uses the
+    # request's. They travel to the runner as they are (Resolve-RefreshPlanByIds).
+    $dataflowEntries = @()
+    foreach ($rawEntry in @(@($Body.Dataflows) | Where-Object { $null -ne $_ })) {
+        $entryWorkspaceId = if ($rawEntry.WorkspaceId) { ([string]$rawEntry.WorkspaceId).Trim() } else { $workspaceId }
+        $entryWorkspaceGuid = [Guid]::Empty
+        $entryDataflowGuid = [Guid]::Empty
+        if (-not [Guid]::TryParse($entryWorkspaceId, [ref]$entryWorkspaceGuid) -or -not [Guid]::TryParse(([string]$rawEntry.DataflowId).Trim(), [ref]$entryDataflowGuid)) {
+            return [pscustomobject]@{ Ok = $false; Error = "Every dataflow must have valid workspace and dataflow GUIDs" }
+        }
+        $key = ($entryWorkspaceGuid.ToString() + "|" + $entryDataflowGuid.ToString()).ToLowerInvariant()
+        $legacyKey = $entryDataflowGuid.ToString().ToLowerInvariant()
+        if ($seenDataflows.ContainsKey($key) -or ($entryWorkspaceGuid.ToString() -eq $workspaceId -and $seenDataflows.ContainsKey($legacyKey))) { continue }
+        $seenDataflows[$key] = $true
+        $dataflowEntries += [pscustomobject][ordered]@{ WorkspaceId = $entryWorkspaceGuid.ToString(); DataflowId = $entryDataflowGuid.ToString() }
     }
 
     $rawModels = if ($Body.SemanticModels) {
@@ -263,12 +355,85 @@ function Get-RefreshRequest {
     return [pscustomobject]@{
         Ok = $true
         Error = ""
-        WorkspaceId = $workspaceGuid.ToString()
+        WorkspaceId = $workspaceId
         DataflowIds = @($dataflows)
+        Dataflows = @($dataflowEntries)
         SemanticModels = @($models)
         NotificationRecipients = @($normalizedRecipients.Recipients)
         EmailDryRun = ($Body.EmailDryRun -eq $true)
     }
+}
+
+function ConvertTo-RefreshProcessArgument {
+    param([string]$Value)
+    return '"' + $Value.Replace('"', '\"') + '"'
+}
+
+function New-RefreshRunnerStartInfo {
+    # Process start settings for runtime\Invoke-RefreshRun.ps1, the refresh runner the
+    # Claude skill uses too. The plan travels as base64 JSON; the token and its sign-in
+    # mode travel only in the child's environment, never in its arguments or a file.
+    # The child inherits this server's PSModulePath, so it finds MSAL.PS the same way.
+    param(
+        [Parameter(Mandatory = $true)][object]$RefreshRequest,
+        [Parameter(Mandatory = $true)][string]$RunnerPath,
+        [Parameter(Mandatory = $true)][string]$StatusFile,
+        [Parameter(Mandatory = $true)][string]$ErrorLogPath,
+        [AllowNull()][string]$Token,
+        [AllowNull()][string]$AuthMode
+    )
+
+    $planObject = [ordered]@{
+        WorkspaceId = [string]$RefreshRequest.WorkspaceId
+        DataflowIds = @($RefreshRequest.DataflowIds)
+        SemanticModels = @($RefreshRequest.SemanticModels)
+    }
+    # Dataflows with their own workspace go only when there are any, so a plan in the
+    # original form stays byte-for-byte what it was.
+    if (@($RefreshRequest.Dataflows).Count -gt 0) { $planObject.Dataflows = @($RefreshRequest.Dataflows) }
+    $plan = $planObject | ConvertTo-Json -Depth 10 -Compress
+    $planBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($plan))
+
+    $arguments = @(
+        "-NoProfile"
+        "-ExecutionPolicy Bypass"
+        "-WindowStyle Hidden"
+        "-File $(ConvertTo-RefreshProcessArgument $RunnerPath)"
+        "-PlanBase64 $planBase64"
+        "-StatusFile $(ConvertTo-RefreshProcessArgument $StatusFile)"
+        "-ErrorLogPath $(ConvertTo-RefreshProcessArgument $ErrorLogPath)"
+        "-Confirmed"
+    )
+    # powershell.exe -File binds a list parameter only once, so recipients go as one value.
+    $recipientList = @($RefreshRequest.NotificationRecipients | Where-Object { $_ }) -join ","
+    if ($recipientList) { $arguments += "-Recipients $(ConvertTo-RefreshProcessArgument $recipientList)" }
+    if ($RefreshRequest.EmailDryRun -eq $true) { $arguments += "-PreviewEmail" }
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = "powershell.exe"
+    $psi.Arguments = $arguments -join " "
+    $psi.CreateNoWindow = $true
+    $psi.UseShellExecute = $false
+    if (-not [string]::IsNullOrWhiteSpace($Token)) {
+        $psi.EnvironmentVariables["POWERBI_REFRESH_INITIAL_TOKEN"] = $Token
+        $psi.EnvironmentVariables["POWERBI_REFRESH_INITIAL_TOKEN_MODE"] = [string]$AuthMode
+    }
+    return $psi
+}
+
+function Test-RefreshWorkerAlive {
+    # True while the runner process recorded in the worker file still runs. A missing
+    # or unreadable record counts as alive, so a refresh started before the record
+    # existed is never declared dead; a recorded process that is gone (or whose start
+    # time differs, because Windows reused its ID) means the worker died.
+    param([string]$WorkerFile)
+
+    if (-not (Test-Path -LiteralPath $WorkerFile)) { return $true }
+    try { $worker = Get-Content -LiteralPath $WorkerFile -Raw | ConvertFrom-Json } catch { return $true }
+    if ($null -eq $worker -or -not $worker.pid) { return $true }
+    $process = Get-Process -Id ([int]$worker.pid) -ErrorAction SilentlyContinue
+    if ($null -eq $process) { return $false }
+    try { return $process.StartTime.ToString("o") -eq [string]$worker.startTime } catch { return $true }
 }
 
 function Get-RebindRequest {
@@ -377,18 +542,98 @@ function Set-RebindFailure($Message) {
 }
 
 # ============================================================
+# App window (Edge --app mode)
+# ============================================================
+function Show-ServerConsole {
+    # The device-code prompt is printed here, so a minimized console is brought back for sign-in.
+    try {
+        if (-not ('ControlPanel.ConsoleWindow' -as [type])) {
+            Add-Type -Namespace ControlPanel -Name ConsoleWindow -MemberDefinition @'
+[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+'@
+        }
+        $handle = [ControlPanel.ConsoleWindow]::GetConsoleWindow()
+        if ($handle -ne [IntPtr]::Zero) {
+            [ControlPanel.ConsoleWindow]::ShowWindow($handle, 9) | Out-Null
+            [ControlPanel.ConsoleWindow]::SetForegroundWindow($handle) | Out-Null
+        }
+    } catch { }
+}
+
+function Find-EdgePath {
+    $candidates = @(
+        (Join-Path ${env:ProgramFiles(x86)} "Microsoft\Edge\Application\msedge.exe"),
+        (Join-Path $env:ProgramFiles "Microsoft\Edge\Application\msedge.exe"),
+        (Join-Path $env:LOCALAPPDATA "Microsoft\Edge\Application\msedge.exe")
+    )
+    foreach ($candidate in $candidates) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate }
+    }
+    try {
+        $appPath = (Get-ItemProperty "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe" -ErrorAction Stop).'(default)'
+        if ($appPath -and (Test-Path -LiteralPath $appPath)) { return $appPath }
+    } catch { }
+    return $null
+}
+
+function Start-AppWindow([string]$Url) {
+    # A dedicated Edge profile makes the started process own this window only,
+    # so its exit means the user closed the app.
+    $edgePath = Find-EdgePath
+    if (-not $edgePath) {
+        Write-Host "Microsoft Edge was not found. Opening the default browser instead." -ForegroundColor Yellow
+        Start-Process $Url
+        return $null
+    }
+    $profileDir = Join-Path $env:LOCALAPPDATA "PowerBIControlPanel\EdgeAppProfile"
+    if (-not (Test-Path -LiteralPath $profileDir)) { New-Item -ItemType Directory -Path $profileDir -Force | Out-Null }
+    $edgeArgs = @(
+        "--app=$Url",
+        "--user-data-dir=`"$profileDir`"",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--disable-features=msImplicitSignin",
+        "--window-size=1400,900"
+    )
+    return Start-Process -FilePath $edgePath -ArgumentList $edgeArgs -PassThru
+}
+
+# ============================================================
 # Start HTTP listener
 # ============================================================
+$appUrl = "http://localhost:$Port/"
 $listener = New-Object System.Net.HttpListener
-$listener.Prefixes.Add("http://localhost:$Port/")
+$listener.Prefixes.Add($appUrl)
 $listener.Start()
 
+if (-not $listener.IsListening) {
+    if ($AppWindow) {
+        # Most likely the Control Panel is already running: open a window onto it and leave.
+        Write-Host "Port $Port is in use. Opening a window onto the running Control Panel." -ForegroundColor Yellow
+        Start-AppWindow $appUrl | Out-Null
+        exit 0
+    }
+    Write-Host "Could not listen on port $Port. Is the Control Panel already running?" -ForegroundColor Red
+    exit 1
+}
+
 Write-Host "Dashboard running at: http://localhost:$Port" -ForegroundColor Yellow
-Write-Host "Do not close this window - it is the server." -ForegroundColor Gray
+if ($AppWindow) {
+    Write-Host "Closing the app window stops the server." -ForegroundColor Gray
+} else {
+    Write-Host "Do not close this window - it is the server." -ForegroundColor Gray
+}
 Write-Host "==============================================" -ForegroundColor Cyan
 Write-Host ""
 
-if (-not $NoBrowser) { Start-Process "http://localhost:$Port" }
+$appProcess = $null
+if ($AppWindow) {
+    $appProcess = Start-AppWindow $appUrl
+} elseif (-not $NoBrowser) {
+    Start-Process "http://localhost:$Port"
+}
 
 # Clear stale status files
 @{ running = $false; result = ""; logs = @(); dataflowStatus = ""; datasetStatus = ""; dataflowDetails = @(); semanticModelDetails = @(); emailStatus = ""; emailWarning = ""; error = "" } | ConvertTo-Json -Depth 10 | Set-Content $statusFile
@@ -399,7 +644,17 @@ if (-not (Test-Path -LiteralPath $partitionRefreshStatusFile)) {
 }
 
 while ($listener.IsListening) {
-    $context = $listener.GetContext()
+    # Wait in short slices so a closed app window is noticed between requests.
+    $contextTask = $listener.GetContextAsync()
+    while (-not $contextTask.Wait(500)) {
+        if ($appProcess -and $appProcess.HasExited) { break }
+    }
+    if (-not $contextTask.IsCompleted) {
+        Write-Host "App window closed. Stopping the server." -ForegroundColor Yellow
+        $listener.Stop()
+        break
+    }
+    $context = $contextTask.Result
     $request = $context.Request
     $response = $context.Response
     $path = $request.Url.AbsolutePath
@@ -426,6 +681,29 @@ while ($listener.IsListening) {
                     $response.ContentLength64 = $bytes.Length
                     $response.OutputStream.Write($bytes, 0, $bytes.Length)
                 } else { $response.StatusCode = 404 }
+            }
+            "^/api/catalog/" {
+                # Read-only name lookups for the pickers; see Invoke-CatalogRequest.
+                try { $catalogToken = Get-Token } catch {
+                    $response.StatusCode = 401
+                    Send-Json $response @{ ok = $false; error = "Sign in first to look up names." }
+                    continue
+                }
+                $catalogBody = $null
+                if ($method -eq "POST") {
+                    $reader = New-Object System.IO.StreamReader($request.InputStream)
+                    try { $catalogBody = $reader.ReadToEnd() | ConvertFrom-Json -ErrorAction Stop } catch { $catalogBody = $null }
+                    $reader.Close()
+                    if ($null -eq $catalogBody) {
+                        $response.StatusCode = 400
+                        Send-Json $response @{ ok = $false; error = "Invalid catalog request JSON" }
+                        continue
+                    }
+                }
+                $catalogResult = Invoke-CatalogRequest -Path $path -Method $method -Query $request.QueryString -Body $catalogBody -Token $catalogToken
+                $catalogToken = $null
+                $response.StatusCode = $catalogResult.Status
+                Send-Json $response $catalogResult.Body
             }
             "^/api/profiles$" {
                 if ($method -eq "GET") {
@@ -479,6 +757,7 @@ while ($listener.IsListening) {
                 Send-Json $response @{
                     authenticated = ($global:cachedToken -ne $null)
                     msalAvailable = $global:msalAvailable
+                    authMode = $global:authMode
                     error = $authError
                 }
             }
@@ -496,7 +775,7 @@ while ($listener.IsListening) {
                 if ($method -ne "POST") { $response.StatusCode = 405; continue }
 
                 $current = if (Test-Path $statusFile) { Get-Content $statusFile -Raw | ConvertFrom-Json } else { $null }
-                if ($current -and $current.running) {
+                if ($current -and $current.running -and (Test-RefreshWorkerAlive $workerFile)) {
                     Send-Json $response @{ ok = $false; error = "A refresh is already running" }
                     continue
                 }
@@ -525,46 +804,17 @@ while ($listener.IsListening) {
                     continue
                 }
 
-                # Read template and substitute placeholders
-                $templatePath = Join-Path $scriptDir "_refresh-worker-template.ps1"
+                # The refresh itself runs in runtime\Invoke-RefreshRun.ps1, the runner the
+                # Claude skill uses too. The old _worker.ps1, generated from
+                # _refresh-worker-template.ps1 with the token written into it, is no
+                # longer used; an old copy is removed because it may still hold a token.
+                $runnerPath = Join-Path $scriptDir "runtime\Invoke-RefreshRun.ps1"
                 $emailModulePath = Join-Path $scriptDir "refresh-email.ps1"
-                if (-not (Test-Path $templatePath) -or -not (Test-Path $emailModulePath)) {
-                    Send-Json $response @{ ok = $false; error = "Refresh worker or email module was not found" }
+                if (-not (Test-Path $runnerPath) -or -not (Test-Path $emailModulePath)) {
+                    Send-Json $response @{ ok = $false; error = "Refresh runner or email module was not found" }
                     continue
                 }
-                $payload = [ordered]@{
-                    WorkspaceId = $refreshRequest.WorkspaceId
-                    DataflowIds = @($refreshRequest.DataflowIds)
-                    SemanticModels = @($refreshRequest.SemanticModels)
-                    NotificationRecipients = @($refreshRequest.NotificationRecipients)
-                    EmailDryRun = $refreshRequest.EmailDryRun
-                } | ConvertTo-Json -Depth 10 -Compress
-                $payloadBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($payload))
-                $workerScript = [System.IO.File]::ReadAllText($templatePath)
-                $workerScript = $workerScript.Replace("{{StatusFile}}", $statusFile)
-                $workerScript = $workerScript.Replace("{{LogsDir}}", $logsDir)
-                $workerScript = $workerScript.Replace("{{EmailModule}}", $emailModulePath)
-                $workerScript = $workerScript.Replace("{{TokenFile}}", $tokenFile)
-                $workerScript = $workerScript.Replace("{{RefreshPayload}}", $payloadBase64)
-                $workerScript = $workerScript.Replace("{{Token}}", $tokenForWorker)
-
-                # Validate: must have replaced all placeholders
-                if ($workerScript -match '\{\{') {
-                    Send-Json $response @{ ok = $false; error = "Worker template has unreplaced placeholders" }
-                    continue
-                }
-                if ($workerScript.Length -lt 200) {
-                    Send-Json $response @{ ok = $false; error = "Worker script too short ($($workerScript.Length) chars) -- template likely broken" }
-                    continue
-                }
-
-                $workerPath = Join-Path $scriptDir "_worker.ps1"
-                [System.IO.File]::WriteAllText($workerPath, $workerScript, (New-Object System.Text.UTF8Encoding $true))
-
-                if (-not (Test-Path $workerPath) -or (Get-Item $workerPath).Length -lt 200) {
-                    Send-Json $response @{ ok = $false; error = "Failed to write worker script" }
-                    continue
-                }
+                Remove-Item -LiteralPath (Join-Path $scriptDir "_worker.ps1") -Force -ErrorAction SilentlyContinue
 
                 [ordered]@{
                     running = $true; result = "Starting"; startTime = (Get-Date -Format "o"); endTime = ""; durationSeconds = 0
@@ -574,17 +824,20 @@ while ($listener.IsListening) {
                 } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $statusFile
 
                 $errorLog = Join-Path $logsDir "refresh-worker-errors.log"
-                $psi = New-Object System.Diagnostics.ProcessStartInfo
-                $psi.FileName = "powershell.exe"
-                $psi.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$workerPath`" 2>`"$errorLog`""
-                $psi.CreateNoWindow = $true
-                $psi.UseShellExecute = $false
-                $proc = [System.Diagnostics.Process]::Start($psi)
+                $psi = New-RefreshRunnerStartInfo -RefreshRequest $refreshRequest -RunnerPath $runnerPath -StatusFile $statusFile -ErrorLogPath $errorLog -Token $tokenForWorker -AuthMode $global:authMode
+                $proc = $null
+                try { $proc = [System.Diagnostics.Process]::Start($psi) } catch { $proc = $null }
+                $psi = $null
                 if (-not $proc) {
                     @{ running = $false; result = "Failed"; logs = @(); dataflowStatus = ""; datasetStatus = ""; dataflowDetails = @(); semanticModelDetails = @(); emailStatus = ""; emailWarning = ""; error = "Failed to start worker process" } | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $statusFile
                     Send-Json $response @{ ok = $false; error = "Failed to start worker process" }
                     continue
                 }
+                # Which process runs this refresh, so a worker that dies does not leave the
+                # tab stuck on "already running".
+                $workerStart = ""
+                try { $workerStart = $proc.StartTime.ToString("o") } catch { }
+                [ordered]@{ pid = $proc.Id; startTime = $workerStart } | ConvertTo-Json | Set-Content -LiteralPath $workerFile
 
                 Send-Json $response @{ ok = $true }
             }
@@ -592,6 +845,9 @@ while ($listener.IsListening) {
                 if ($method -ne "GET") { $response.StatusCode = 405; continue }
                 if (Test-Path $statusFile) {
                     $s = Get-Content $statusFile -Raw | ConvertFrom-Json
+                    # A worker that died cannot clear "running" itself. Report it as not
+                    # running, so the Refresh tab shows "Worker died" and points to the log.
+                    if ($s -and $s.running -and -not (Test-RefreshWorkerAlive $workerFile)) { $s.running = $false }
                     Send-Json $response $s
                 } else {
                     Send-Json $response @{ running = $false; result = ""; logs = @(); dataflowStatus = ""; datasetStatus = ""; dataflowDetails = @(); semanticModelDetails = @(); emailStatus = ""; emailWarning = ""; error = "" }

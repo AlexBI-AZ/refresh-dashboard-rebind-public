@@ -8,7 +8,7 @@ function Assert($Condition, $Message) {
 $valid = Get-PartitionRefreshRequest ([pscustomobject]@{
     WorkspaceId = "00000000-0000-0000-0000-000000000001"
     DatasetId = "00000000-0000-0000-0000-000000000002"
-    TableName = " Sales Fact "
+    TableName = " Sales Facts "
     Partitions = @("2019", " 2020 ")
 })
 Assert $valid.Ok "Valid request was rejected"
@@ -17,7 +17,7 @@ Assert ($json -match '"type":"full"') "type must be full"
 Assert ($json -match '"commitMode":"transactional"') "commitMode must be transactional"
 Assert ($json -match '"applyRefreshPolicy":false') "applyRefreshPolicy must be Boolean false"
 Assert ($json -notmatch 'notifyOption') "notifyOption must be absent"
-Assert ($valid.TableName -eq " Sales Fact ") "Table name was transformed"
+Assert ($valid.TableName -eq " Sales Facts ") "Table name was transformed"
 Assert ($valid.Partitions[1] -eq " 2020 ") "Partition name was transformed"
 
 $badWorkspace = Get-PartitionRefreshRequest ([pscustomobject]@{ WorkspaceId = "bad"; DatasetId = [Guid]::NewGuid(); TableName = "T"; Partitions = @("P") })
@@ -41,8 +41,8 @@ Assert ($statusBlock -notmatch '-Method POST') "Status route must not use POST"
 Assert ($historyBlock -match 'Invoke-RestMethod -Method GET') "History route must use GET"
 Assert ($historyBlock -notmatch '-Method POST') "History route must not use POST"
 
-$stale = '{"requestId":"request-1","status":"Unknown","extendedStatus":"InProgress","running":true,"startTime":"","endTime":"","objects":[{"partition":"2019","status":"InProgress"}],"messages":[]}' | ConvertFrom-Json
-$history = '{"value":[{"requestId":"different","status":"Failed"},{"requestId":"request-1","status":"Failed","endTime":"2026-10-13T13:00:00Z","serviceExceptionJson":"{\"errorCode\":\"RefreshFailed\"}"}]}' | ConvertFrom-Json
+$stale = '{"requestId":"00000000-0000-0000-0000-0000000000a1","status":"Unknown","extendedStatus":"InProgress","running":true,"startTime":"","endTime":"","objects":[{"partition":"2019","status":"InProgress"}],"messages":[]}' | ConvertFrom-Json
+$history = '{"value":[{"requestId":"different","status":"Failed"},{"requestId":"00000000-0000-0000-0000-0000000000a1","status":"Failed","endTime":"2026-10-13T13:00:00Z","serviceExceptionJson":"{\"errorCode\":\"RefreshFailed\"}"}]}' | ConvertFrom-Json
 Assert (Update-PartitionRefreshStateFromHistory $stale $history) "Matching failed history entry was ignored"
 Assert (Test-PartitionRefreshTerminalStatus $stale) "Failed history did not make the request terminal"
 Assert ($stale.status -eq 'Failed' -and $stale.extendedStatus -eq 'Failed') "Terminal status was not reflected in both fields"

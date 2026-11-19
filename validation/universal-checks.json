@@ -1,0 +1,15 @@
+{
+  "description": "Checks that work for any semantic model. Used for every refresh whose model has no report config in reports\\*.config.json; workspaceName, reportName and semanticModelName are filled in per run.",
+  "emailNote": "Сравнение до и после обновления по проверкам, общим для любой модели. Строки по таблицам: WARN при изменении от 10%, FAIL от 25% или если в таблице с данными не осталось строк. Автоматические таблицы дат, группы вычислений и таблицы DirectQuery не считаются. Структура модели показана для сведения и на результат не влияет.",
+  "modelStructure": true,
+  "checks": [
+    {
+      "id": "rows_per_table",
+      "label": "Rows per table",
+      "kind": "table_rows",
+      "format": "N0",
+      "warnPercent": 10,
+      "failPercent": 25
+    }
+  ]
+}

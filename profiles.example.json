@@ -1,1 +1,28 @@
-[]
+[
+  {
+    "name": "Sales Dashboard (example)",
+    "WorkspaceId": "00000000-0000-0000-0000-000000000001",
+    "WorkspaceName": "Contoso TEST",
+    "DataflowIds": [
+      "00000000-0000-0000-0000-000000000002"
+    ],
+    "Dataflows": [
+      {
+        "WorkspaceId": "00000000-0000-0000-0000-000000000001",
+        "DataflowId": "00000000-0000-0000-0000-000000000002",
+        "Name": "Sales Dataflow",
+        "WorkspaceName": "Contoso TEST"
+      }
+    ],
+    "SemanticModels": [
+      {
+        "WorkspaceId": "00000000-0000-0000-0000-000000000001",
+        "DatasetId": "00000000-0000-0000-0000-000000000003",
+        "Name": "Sales Dashboard",
+        "WorkspaceName": "Contoso TEST"
+      }
+    ],
+    "NotifyEmails": "",
+    "EmailDryRun": true
+  }
+]

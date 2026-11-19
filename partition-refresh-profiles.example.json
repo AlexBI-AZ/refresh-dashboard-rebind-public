@@ -1,1 +1,14 @@
-[]
+[
+  {
+    "name": "Sales 2025 (example)",
+    "WorkspaceId": "00000000-0000-0000-0000-000000000001",
+    "WorkspaceName": "Contoso TEST",
+    "DatasetId": "00000000-0000-0000-0000-000000000003",
+    "DatasetName": "Sales Dashboard",
+    "TableName": "Sales",
+    "Partitions": [
+      "Sales 2025-01",
+      "Sales 2025-02"
+    ]
+  }
+]

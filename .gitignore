@@ -3,15 +3,30 @@ logs/
 .token
 rebind-status.json
 refresh-status.json
+refresh-worker.json
 partition-refresh-status.json
 _rebind-worker.ps1
 _worker.ps1
 *-worker-errors.log
 
-# Local profile data: may contain workspace IDs, PBIP paths, and recipient addresses
+# Local profile data: may contain workspace IDs, PBIP paths, and recipient addresses.
+# The *.example.json files show the format and are kept.
 profiles.json
 rebind-profiles.json
 partition-refresh-profiles.json
+
+# Validation configs name real workspaces, reports and model tables. Only the example ships.
+validation/reports/*.config.json
+!validation/reports/example.config.json
+
+# Backups, private notes, and certificates
+*.bak
+*.bak-*
+HANDOFF*.md
+SECURITY_REVIEW.md
+CONVERGENCE*.md
+*.pfx
+*.cer
 
 # Keep local environment configuration out of source control
 .env

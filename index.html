@@ -3,649 +3,922 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light">
 <title>Power BI Dashboard Control Panel</title>
 <link rel="icon" type="image/png" sizes="32x32" href="favicon.png">
 <link rel="shortcut icon" href="favicon.ico">
 <style>
   :root {
-    --bg: #0f1117;
-    --surface: #1a1d27;
-    --surface2: #242836;
-    --border: #2d3245;
-    --text: #e4e6ed;
-    --text2: #8b90a0;
-    --accent: #6c8cff;
-    --accent-glow: rgba(108,140,255,0.25);
-    --accent2: #a78bfa;
-    --accent2-glow: rgba(167,139,250,0.25);
-    --green: #4ade80;
-    --red: #f87171;
-    --yellow: #fbbf24;
-    --radius: 10px;
-    --font: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --canvas: #F3F5F8;
+    --surface: #FFFFFF;
+    --sunken: #F7F8FB;
+    --ink: #141B2D;
+    --ink-2: #596377;
+    --ink-3: #8A93A6;
+    --line: #E2E6ED;
+    --line-strong: #CBD2DC;
+
+    --refresh: #2B59D9;
+    --partition: #0B7D6E;
+    --rebind: #6D47D9;
+
+    --ok: #12805C;     --ok-soft: #E6F4EE;     --ok-line: #A9D9C4;
+    --err: #C23A2E;    --err-soft: #FCECEA;    --err-line: #F0B8B1;
+    --warn: #8F5600;   --warn-soft: #FFF5DF;   --warn-line: #F0D39A;
+
+    /* Names kept for markup that the script and the help text generate */
+    --text: var(--ink); --text2: var(--ink-2); --border: var(--line);
+    --surface2: var(--sunken); --accent2: var(--rebind);
+    --green: var(--ok); --red: var(--err); --yellow: var(--warn);
+
+    --font: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "Cascadia Mono", "Cascadia Code", Consolas, "SF Mono", monospace;
+    --r-panel: 14px;
+    --r-ctl: 8px;
+    --shadow-panel: 0 1px 2px rgba(20,27,45,0.04), 0 4px 16px rgba(20,27,45,0.04);
   }
-  * { margin:0; padding:0; box-sizing:border-box; }
+
+  /* The active tab sets the accent; derived tints are declared on the same element */
+  body { --accent: var(--refresh); }
+  body[data-tab="partition-refresh"] { --accent: var(--partition); }
+  body[data-tab="rebind"] { --accent: var(--rebind); }
   body {
-    background: var(--bg); color: var(--text); font-family: var(--font);
-    height: 100vh; display: flex; overflow: hidden;
+    --accent-soft: color-mix(in srgb, var(--accent) 9%, white);
+    --accent-line: color-mix(in srgb, var(--accent) 35%, white);
+    --accent-ring: color-mix(in srgb, var(--accent) 24%, transparent);
+    --accent-strong: color-mix(in srgb, var(--accent) 82%, black);
   }
 
-  /* Sidebar */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--canvas); color: var(--ink); font-family: var(--font);
+    font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+    display: flex; overflow: hidden;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  :focus-visible { outline: 3px solid var(--accent-ring); outline-offset: 1px; }
+  ::selection { background: var(--accent-ring); }
+  * { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  svg.icon { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none;
+    stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- Sidebar ---------- */
   .sidebar {
-    width: 320px; background: var(--surface); border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; flex-shrink: 0;
+    width: 284px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: var(--canvas); border-right: 1px solid var(--line);
   }
-  .sidebar-header {
-    padding: 24px 20px 16px; border-bottom: 1px solid var(--border);
+  .brand { display: flex; align-items: center; gap: 10px; padding: 20px 20px 16px; }
+  .brand img { width: 28px; height: 28px; border-radius: 7px; }
+  .brand h1 {
+    font-family: var(--font-display); font-size: 15px; font-weight: 600;
+    line-height: 1.25; letter-spacing: -0.1px;
   }
-  .sidebar-header h1 {
-    font-size: 18px; font-weight: 700; letter-spacing: -0.3px;
-    background: linear-gradient(135deg, var(--accent), var(--accent2));
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
-  }
-  .sidebar-header p { font-size: 12px; color: var(--text2); margin-top: 4px; }
 
-  /* Tab toggle pills */
   .tab-toggle {
-    display: flex; gap: 4px; padding: 12px 16px; border-bottom: 1px solid var(--border);
-    background: var(--surface);
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+    margin: 0 16px 16px; padding: 3px; border-radius: 10px;
+    background: #E7EAF0;
   }
   .tab-pill {
-    flex: 1; padding: 8px 0; border-radius: 8px; border: 1px solid var(--border);
-    background: var(--surface2); color: var(--text2); cursor: pointer;
-    font-size: 13px; font-weight: 600; text-align: center;
-    transition: all 0.2s;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 8px 4px 7px; border: 0; border-radius: 8px; background: transparent;
+    color: var(--ink-2); font-size: 12.5px; font-weight: 600;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
   }
-  .tab-pill:hover { border-color: var(--accent); color: var(--text); }
+  .tab-pill:hover { color: var(--ink); }
   .tab-pill.active {
-    border-color: var(--accent); background: rgba(108,140,255,0.12); color: var(--text);
-    box-shadow: 0 0 0 2px var(--accent-glow);
+    background: var(--surface); color: var(--accent-strong);
+    box-shadow: 0 1px 2px rgba(20,27,45,0.08), 0 0 0 1px rgba(20,27,45,0.04);
   }
-  .tab-pill.rebind.active {
-    border-color: var(--accent2); background: rgba(167,139,250,0.12);
-    box-shadow: 0 0 0 2px var(--accent2-glow);
-  }
-  .tab-pill.partition.active {
-    border-color: var(--green); background: rgba(74,222,128,0.10); color: var(--text);
-    box-shadow: 0 0 0 2px rgba(74,222,128,0.20);
-  }
-  .tab-pill .pill-icon { font-size: 15px; margin-right: 4px; vertical-align: -1px; }
+  .tab-pill .icon { width: 17px; height: 17px; }
 
-  .profile-list {
-    flex: 1; overflow-y: auto; padding: 12px;
+  .list-heading {
+    display: flex; align-items: baseline; justify-content: space-between;
+    padding: 0 20px 6px; font-size: 12.5px; font-weight: 600; color: var(--ink-2);
   }
+  .profile-list { flex: 1; overflow-y: auto; padding: 2px 12px 12px; }
   .profile-card {
-    background: var(--surface2); border: 1px solid var(--border); border-radius: var(--radius);
-    padding: 14px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s;
+    position: relative; display: block; width: 100%; text-align: left;
+    padding: 10px 12px 10px 14px; margin-bottom: 2px;
+    border: 1px solid transparent; border-radius: 10px; background: transparent;
+    transition: background 0.12s, border-color 0.12s;
   }
-  .profile-card:hover { border-color: var(--accent); background: #262b3a; }
-  .profile-card.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-glow); }
-  .profile-card .name { font-weight: 600; font-size: 14px; margin-bottom: 6px; }
-  .profile-card .ids { font-size: 11px; color: var(--text2); font-family: 'SF Mono', 'Consolas', monospace; }
-  .profile-card .ids span { display: block; overflow: hidden; text-overflow: ellipsis; }
-
-  .sidebar-actions { padding: 12px; border-top: 1px solid var(--border); display: flex; gap: 8px; }
-  .sidebar-actions button {
-    flex: 1; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius);
-    background: var(--surface2); color: var(--text); cursor: pointer; font-size: 13px; font-weight: 500;
-    transition: all 0.15s;
+  .profile-card:hover { background: rgba(20,27,45,0.04); }
+  .profile-card.selected {
+    background: var(--surface); border-color: var(--line);
+    box-shadow: 0 1px 2px rgba(20,27,45,0.05);
   }
-  .sidebar-actions button:hover { border-color: var(--accent); }
-  .sidebar-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
-  .sidebar-actions button.primary:hover { filter: brightness(1.1); }
-  .sidebar-actions button.danger { color: var(--red); }
-  .sidebar-actions button.danger:hover { border-color: var(--red); background: rgba(248,113,113,0.1); }
+  .profile-card.selected::before {
+    content: ''; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px;
+    border-radius: 0 3px 3px 0; background: var(--accent);
+  }
+  .profile-card .name {
+    display: block; font-weight: 600; font-size: 13.5px; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .profile-card .ids {
+    display: flex; flex-wrap: wrap; gap: 2px 10px; margin-top: 2px;
+    font-size: 12px; color: var(--ink-3);
+  }
+  .profile-card .ids span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .profile-card .ids .mono { flex-basis: 100%; font-family: var(--mono); font-size: 11px; }
+  .profile-card .ids .ws-name { flex-basis: 100%; }
+  .list-empty { padding: 20px 12px; color: var(--ink-3); font-size: 13px; line-height: 1.55; text-align: center; }
 
   .sidebar-rebind-info {
-    flex: 1; padding: 20px; color: var(--text2); font-size: 13px; line-height: 1.6;
-    overflow-y: auto;
+    margin: 0 16px 12px; padding: 14px 16px; border-radius: 12px;
+    background: var(--surface); border: 1px solid var(--line);
+    color: var(--ink-2); font-size: 13px; line-height: 1.55; overflow-y: auto;
   }
-  .sidebar-rebind-info h4 { color: var(--accent2); font-size: 13px; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .sidebar-rebind-info p { margin-bottom: 10px; }
-  .sidebar-rebind-info code { background: var(--surface2); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .sidebar-rebind-info h4 { color: var(--ink); font-size: 13.5px; margin-bottom: 6px; }
+  .sidebar-rebind-info p { margin-bottom: 8px; }
+  .sidebar-rebind-info ol { padding-left: 18px; margin-bottom: 10px; }
+  .sidebar-rebind-info code { font-family: var(--mono); font-size: 12px; background: var(--sunken); padding: 1px 5px; border-radius: 4px; }
+  .sidebar-rebind-info .note {
+    margin: 0; padding: 8px 10px; border-radius: 8px;
+    background: var(--warn-soft); color: var(--warn); font-size: 12.5px;
+  }
 
-  /* Main */
-  .main {
-    flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  .sidebar-actions { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line); }
+  .sidebar-actions button {
+    flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    height: 36px; border-radius: var(--r-ctl); font-size: 13px; font-weight: 600;
+    border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
   }
-  .main-header {
-    padding: 24px 32px 16px; border-bottom: 1px solid var(--border);
+  .sidebar-actions button:hover { border-color: var(--ink-3); }
+  .sidebar-actions button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .sidebar-actions button.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
+  .sidebar-actions button.danger { color: var(--err); }
+  .sidebar-actions button.danger:hover:not(:disabled) { background: var(--err-soft); border-color: var(--err-line); }
+  .sidebar-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  .sidebar-foot {
     display: flex; align-items: center; justify-content: space-between;
+    padding: 0 20px 14px; font-size: 12px; color: var(--ink-3);
   }
-  .main-header h2 { font-size: 20px; font-weight: 600; letter-spacing: -0.3px; }
-  .main-header.rebind h2 { color: var(--accent2); }
+  .version-pill {
+    border: 0; background: none; padding: 2px 6px; margin-right: -6px; border-radius: 6px;
+    color: var(--ink-3); font-size: 12px;
+  }
+  .version-pill:hover { color: var(--ink); background: rgba(20,27,45,0.05); }
+
+  /* ---------- Main ---------- */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--canvas); }
+  .main-header {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 20px 28px 16px;
+  }
+  .title-block { min-width: 0; }
+  .main-header h2 {
+    font-family: var(--font-display); font-size: 22px; font-weight: 600;
+    letter-spacing: -0.3px; line-height: 1.25;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .main-header .subtitle { margin-top: 2px; font-size: 13px; color: var(--ink-2); }
+  .header-meta { display: flex; align-items: center; gap: 8px; flex: none; }
+
   .status-badge {
-    padding: 6px 14px; border-radius: 20px; font-size: 12px; font-weight: 600;
-    background: var(--surface2); border: 1px solid var(--border);
-    transition: all 0.2s;
+    display: inline-flex; align-items: center; gap: 7px;
+    height: 28px; padding: 0 12px; border-radius: 999px;
+    font-size: 12.5px; font-weight: 600; white-space: nowrap;
+    background: var(--surface); border: 1px solid var(--line); color: var(--ink-2);
   }
-  .status-badge.running { background: rgba(108,140,255,0.15); border-color: var(--accent); color: var(--accent); }
-  .status-badge.done { background: rgba(74,222,128,0.15); border-color: var(--green); color: var(--green); }
-  .status-badge.failed { background: rgba(248,113,113,0.15); border-color: var(--red); color: var(--red); }
+  .status-badge::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); }
+  .status-badge.running { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent-strong); }
+  .status-badge.running::before { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  .status-badge.done { background: var(--ok-soft); border-color: var(--ok-line); color: var(--ok); }
+  .status-badge.done::before { background: var(--ok); }
+  .status-badge.failed { background: var(--err-soft); border-color: var(--err-line); color: var(--err); }
+  .status-badge.failed::before { background: var(--err); }
 
-  /* Auth banner */
+  .btn-help {
+    width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line);
+    background: var(--surface); color: var(--ink-2); font-size: 13px; font-weight: 700;
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .btn-help:hover { color: var(--ink); border-color: var(--line-strong); }
+
   .auth-banner {
-    padding: 12px 32px; background: rgba(248,113,113,0.1); border-bottom: 1px solid var(--red);
-    color: var(--red); font-size: 13px; align-items: center; gap: 16px;
+    display: none; align-items: center; gap: 14px;
+    margin: 0 28px 14px; padding: 10px 10px 10px 14px; border-radius: 10px;
+    background: var(--warn-soft); border: 1px solid var(--warn-line);
+    color: var(--warn); font-size: 13px;
   }
+  .auth-banner .icon { width: 18px; height: 18px; }
   .auth-banner button {
-    margin-left: auto; padding: 7px 12px; border-radius: 8px; border: 1px solid var(--red);
-    background: transparent; color: var(--red); cursor: pointer; font-weight: 600;
+    margin-left: auto; flex: none; height: 32px; padding: 0 14px; border-radius: var(--r-ctl);
+    border: 1px solid var(--warn); background: var(--surface); color: var(--warn); font-weight: 600; font-size: 13px;
   }
-  .auth-banner button:hover { background: rgba(248,113,113,0.12); }
-  .auth-banner button:disabled { opacity: 0.55; cursor: wait; }
+  .auth-banner button:hover { background: #fff; box-shadow: 0 0 0 3px rgba(143,86,0,0.12); }
+  .auth-banner button:disabled { opacity: 0.6; cursor: wait; }
 
-  /* Form */
-  .form-area {
-    padding: 24px 32px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px;
-    border-bottom: 1px solid var(--border);
+  .workspace {
+    flex: 1; min-height: 0; display: grid;
+    grid-template-columns: minmax(380px, 1fr) minmax(420px, 1.15fr);
+    gap: 16px; padding: 0 28px 24px;
   }
-  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .pane {
+    min-height: 0; display: flex; flex-direction: column;
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--r-panel); box-shadow: var(--shadow-panel);
+  }
+  .config-pane { overflow-y: auto; }
+  .run-pane { overflow: hidden; }
+
+  /* ---------- Forms ---------- */
+  .form-area { display: grid; grid-template-columns: 1fr 1fr; gap: 18px 16px; padding: 22px 24px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
   .form-group.full { grid-column: 1 / -1; }
-  .form-group label { font-size: 12px; font-weight: 600; color: var(--text2); text-transform: uppercase; letter-spacing: 0.5px; }
-  .form-group input {
-    padding: 10px 14px; background: var(--surface2); border: 1px solid var(--border);
-    border-radius: var(--radius); color: var(--text); font-size: 13px;
-    font-family: 'SF Mono','Consolas',monospace;
-    transition: border-color 0.15s;
+  .form-group > label, .form-group .label {
+    font-size: 13px; font-weight: 600; color: var(--ink);
   }
-  .form-group input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
-  .form-group input.invalid { border-color: var(--red); box-shadow: 0 0 0 3px rgba(248,113,113,0.2); }
-  .form-group input.valid { border-color: var(--green); }
-  .form-group textarea {
-    min-height: 104px; resize: vertical; padding: 10px 14px; background: var(--surface2);
-    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text);
-    font-size: 13px; font-family: 'SF Mono','Consolas',monospace;
+  .form-group .hint { font-size: 12px; color: var(--ink-3); margin-top: -3px; }
+  .form-group input, .form-group select, .form-group textarea,
+  .df-row input, .semantic-row input {
+    width: 100%; min-width: 0; height: 38px; padding: 0 12px;
+    background: var(--surface); border: 1px solid var(--line-strong);
+    border-radius: var(--r-ctl); color: var(--ink); font-size: 13.5px;
+    transition: border-color 0.12s, box-shadow 0.12s;
   }
-  .form-group textarea:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 3px rgba(74,222,128,0.15); }
-  .partition-state { padding: 12px 32px; border-bottom: 1px solid var(--border); color: var(--text2); font-size: 12px; line-height: 1.55; }
-  .partition-state strong { color: var(--text); }
-  .form-group .field-error { font-size: 11px; color: var(--red); min-height: 15px; }
+  .form-group textarea { height: auto; min-height: 112px; padding: 9px 12px; resize: vertical; line-height: 1.55; }
+  #workspaceId, #partitionWorkspaceId, #partitionDatasetId, #partitionNames, #reportPath,
+  .df-row input, .semantic-row input, .mapping-row input {
+    font-family: var(--mono); font-size: 12.5px;
+  }
+  .form-group input::placeholder, .form-group textarea::placeholder,
+  .df-row input::placeholder, .semantic-row input::placeholder { color: var(--ink-3); opacity: 1; }
+  .form-group input:hover, .form-group select:hover, .form-group textarea:hover,
+  .df-row input:hover, .semantic-row input:hover { border-color: var(--ink-3); }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus,
+  .df-row input:focus, .semantic-row input:focus {
+    outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring);
+  }
+  .form-group input.invalid { border-color: var(--err); box-shadow: 0 0 0 3px rgba(194,58,46,0.14); }
+  .form-group input.valid { border-color: var(--ok-line); }
   .form-group select {
-    padding: 10px 14px; background: var(--surface2); border: 1px solid var(--border);
-    border-radius: var(--radius); color: var(--text); font-size: 13px;
-    font-family: var(--font); transition: border-color 0.15s; cursor: pointer;
+    appearance: none; cursor: pointer; padding-right: 30px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23596377' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 10px center;
   }
-  .form-group select:focus { outline: none; border-color: var(--accent2); box-shadow: 0 0 0 3px var(--accent2-glow); }
+  .form-group .field-error { font-size: 12px; color: var(--err); min-height: 0; }
+  .form-group .field-error:empty { display: none; }
+  .form-group .field-note { font-size: 12px; color: var(--ink-3); }
 
-  /* Mapping rows */
-  .mapping-row {
-    display: grid; grid-template-columns: 120px 1fr 28px 1fr 36px; gap: 8px;
-    align-items: start; padding: 12px; background: var(--surface2);
-    border: 1px solid var(--border); border-radius: var(--radius);
-    margin-bottom: 8px; transition: all 0.15s;
+  .form-section { grid-column: 1 / -1; padding-top: 18px; border-top: 1px solid var(--line); }
+  .form-section > .form-group { gap: 8px; }
+
+  .form-footer {
+    grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px;
+    padding-top: 16px; border-top: 1px solid var(--line);
   }
-  .mapping-row:hover { border-color: var(--accent2); }
-  .mapping-row .form-group { gap: 4px; }
-  .mapping-row .form-group label { font-size: 10px; }
-  .mapping-row .form-group input { font-size: 12px; padding: 8px 10px; }
-  .mapping-row .form-group select { font-size: 12px; padding: 8px 10px; }
-  .btn-row-remove {
-    width: 36px; height: 36px; align-self: center; margin-top: 16px;
-    border: 1px solid var(--border); border-radius: var(--radius);
-    background: var(--surface); color: var(--red); cursor: pointer;
-    font-size: 16px; display: flex; align-items: center; justify-content: center;
-    transition: all 0.15s;
+
+  .df-row { display: flex; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .df-row input { flex: 1; }
+  .semantic-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 6px 6px; align-items: center;
+    padding: 8px; margin-bottom: 8px; border-radius: 10px;
+    background: var(--sunken); border: 1px solid var(--line);
   }
-  .btn-row-remove:hover { border-color: var(--red); background: rgba(248,113,113,0.1); }
-  .btn-row-swap {
-    width: 28px; height: 28px; align-self: center; margin-top: 16px;
-    border: 1px solid var(--border); border-radius: 6px;
-    background: var(--surface); color: var(--accent2); cursor: pointer;
-    font-size: 14px; display: flex; align-items: center; justify-content: center;
-    transition: all 0.15s; padding: 0;
+  .semantic-row .field-line { grid-column: 1; display: grid; grid-template-columns: 82px 1fr; align-items: center; gap: 8px; }
+  .semantic-row .field-line > span { font-size: 12px; color: var(--ink-2); padding-left: 4px; }
+  .semantic-row .btn-row-remove { grid-column: 2; grid-row: 1 / span 2; }
+  #dfList { transition: opacity 0.15s; }
+
+  .btn-row-remove, .btn-row-swap {
+    width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+    border: 1px solid transparent; border-radius: var(--r-ctl); background: transparent; color: var(--ink-3);
+    font-size: 15px; line-height: 1; transition: background 0.12s, color 0.12s;
   }
-  .btn-row-swap:hover { border-color: var(--accent2); background: rgba(167,139,250,0.12); }
+  .btn-row-remove:hover { background: var(--err-soft); color: var(--err); }
+  .btn-row-swap { color: var(--ink-2); }
+  .btn-row-swap:hover { background: var(--accent-soft); color: var(--accent-strong); }
 
   .btn-add-mapping {
-    padding: 10px 18px; border: 1px dashed var(--border); border-radius: var(--radius);
-    background: transparent; color: var(--accent2); cursor: pointer;
-    font-size: 13px; font-weight: 500; transition: all 0.15s;
-    width: 100%; text-align: center;
+    display: inline-flex; align-items: center; gap: 6px; align-self: flex-start;
+    height: 32px; padding: 0 10px; margin-left: -10px; border: 0; border-radius: var(--r-ctl);
+    background: transparent; color: var(--accent-strong); font-size: 13px; font-weight: 600;
   }
-  .btn-add-mapping:hover { border-color: var(--accent2); background: rgba(167,139,250,0.06); }
+  .btn-add-mapping:hover { background: var(--accent-soft); }
 
-  /* Dataflow rows */
-  .df-row {
-    display: flex; gap: 8px; align-items: center; margin-bottom: 6px;
+  /* Row children in script order: type, old GUID, swap, new GUID, remove (or an empty div) */
+  .mapping-row {
+    display: grid; grid-template-columns: minmax(0,1fr) 34px; gap: 6px; align-items: center;
+    padding: 8px; margin-bottom: 8px;
+    background: var(--sunken); border: 1px solid var(--line); border-radius: 10px;
   }
-  .df-row input {
-    flex: 1; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border);
-    border-radius: var(--radius); color: var(--text); font-size: 12px;
-    font-family: 'SF Mono','Consolas',monospace;
-    transition: border-color 0.15s;
-  }
-  .df-row input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
-  .df-row .btn-row-remove {
-    width: 30px; height: 30px; margin-top: 0; flex-shrink: 0;
-  }
-  .semantic-row {
-    display: grid; grid-template-columns: 1fr 1fr 30px; gap: 8px; align-items: center; margin-bottom: 6px;
-  }
-  .semantic-row input {
-    min-width: 0; padding: 8px 10px; background: var(--surface2); border: 1px solid var(--border);
-    border-radius: var(--radius); color: var(--text); font-size: 12px;
-    font-family: 'SF Mono','Consolas',monospace; transition: border-color 0.15s;
-  }
-  .semantic-row input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
-  .semantic-row .btn-row-remove { width: 30px; height: 30px; margin-top: 0; }
-  .check-row { display:flex; align-items:center; gap:8px; color:var(--text2); font-size:13px; }
-  .check-row input { width:auto; padding:0; accent-color:var(--accent); }
-  .refresh-item-status { padding: 0 32px 12px; border-bottom: 1px solid var(--border); }
-  .refresh-item-status:empty { display:none; }
-  .item-status-row { display:flex; align-items:center; gap:8px; padding:5px 0; color:var(--text2); font-size:12px; }
-  .item-status-row .dot { width:8px; height:8px; border-radius:50%; background:var(--border); flex:none; }
-  .item-status-row .dot.active { background:var(--accent); box-shadow:0 0 6px var(--accent); }
-  .item-status-row .dot.done { background:var(--green); }
-  .item-status-row .dot.failed { background:var(--red); }
-  .email-warning { display:none; margin:12px 32px 0; padding:10px 12px; border:1px solid var(--yellow); border-radius:var(--radius); color:var(--yellow); background:rgba(251,191,36,0.08); font-size:12px; }
+  .mapping-row > :nth-child(1) { grid-column: 1; grid-row: 1; }
+  .mapping-row > :nth-child(2) { grid-column: 1; grid-row: 2; }
+  .mapping-row > :nth-child(3) { grid-column: 2; grid-row: 2 / span 2; }
+  .mapping-row > :nth-child(4) { grid-column: 1; grid-row: 3; }
+  .mapping-row > :nth-child(5) { grid-column: 2; grid-row: 1; }
+  .mapping-row .form-group { display: grid; grid-template-columns: 82px minmax(0,1fr); align-items: center; gap: 8px; }
+  .mapping-row .form-group label { font-size: 12px; font-weight: 400; color: var(--ink-2); padding-left: 4px; }
+  .mapping-row .form-group select { width: auto; min-width: 150px; justify-self: start; }
 
-  /* Folder picker */
-  .folder-picker {
-    display: flex; gap: 10px; align-items: center;
+  .check-row {
+    display: flex; align-items: flex-start; gap: 9px; cursor: pointer;
+    font-size: 13px; color: var(--ink-2); line-height: 1.45;
   }
-  .folder-picker input { flex: 1; }
-  .btn-browse {
-    padding: 10px 18px; border: 1px solid var(--accent2); border-radius: var(--radius);
-    background: transparent; color: var(--accent2); cursor: pointer;
-    font-size: 13px; font-weight: 500; transition: all 0.15s; white-space: nowrap;
+  .check-row input[type="checkbox"] {
+    width: 16px; height: 16px; margin-top: 1px; flex: none; cursor: pointer; accent-color: var(--accent);
   }
-  .btn-browse:hover { background: rgba(167,139,250,0.1); }
+  .check-row strong { color: var(--ink); font-weight: 600; }
+  .folder-picker { display: flex; gap: 8px; }
 
-  /* Controls */
-  .controls {
-    padding: 16px 32px; border-bottom: 1px solid var(--border);
-    display: flex; gap: 12px; align-items: center;
+  /* ---------- Name pickers (search a list loaded from Power BI) ---------- */
+  .picker { position: relative; }
+  .form-group .picker-input {
+    padding-left: 34px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%238A93A6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: 12px center;
   }
+  .form-group .picker-input.has-value { font-weight: 600; }
+  .picker-list {
+    position: absolute; z-index: 30; top: calc(100% + 4px); left: 0; right: 0;
+    max-height: 320px; overflow-y: auto; list-style: none; padding: 4px;
+    background: var(--surface); border: 1px solid var(--line-strong); border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(20,27,45,0.14), 0 2px 6px rgba(20,27,45,0.06);
+  }
+  .picker-list[hidden] { display: none; }
+  .picker-group {
+    padding: 8px 10px 4px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em;
+    text-transform: uppercase; color: var(--ink-3);
+  }
+  .picker-option { display: flex; flex-direction: column; gap: 1px; padding: 7px 10px; border-radius: 6px; cursor: pointer; }
+  .picker-option .opt-label { font-size: 13.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picker-option .opt-sub { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .picker-option.active { background: var(--accent-soft); }
+  .picker-option.active .opt-label { color: var(--accent-strong); }
+  .picker-option.disabled { cursor: default; }
+  .picker-option.disabled .opt-label { color: var(--ink-3); }
+  .picker-message { padding: 10px; font-size: 13px; color: var(--ink-3); }
+  .picker-more { margin-top: 4px; padding: 7px 10px 4px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+  .picker-note { font-size: 12.5px; color: var(--ink-2); line-height: 1.45; }
+  .picker-note:empty { display: none; }
+  .picker-note.warn { color: var(--warn); }
+  .picker-note.error { color: var(--err); }
+
+  /* Chosen items, shown by name; the ID is in the tooltip and under Advanced */
+  .item-list { display: flex; flex-direction: column; gap: 6px; }
+  .item-list:empty { display: none; }
+  .item-row {
+    display: flex; align-items: center; gap: 10px; min-width: 0;
+    padding: 7px 6px 7px 12px; border-radius: 10px;
+    background: var(--sunken); border: 1px solid var(--line);
+  }
+  .item-row .item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .item-row .item-name { font-size: 13.5px; font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-row .item-name.mono { font-family: var(--mono); font-size: 12.5px; font-weight: 500; }
+  .item-row .item-sub { font-size: 12px; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .item-row .item-sub.muted { color: var(--ink-3); }
+  .list-empty-inline {
+    padding: 11px 12px; border: 1px dashed var(--line-strong); border-radius: 10px;
+    font-size: 12.5px; color: var(--ink-3); line-height: 1.45;
+  }
+
+  /* IDs and manual entry, folded away */
+  .advanced { grid-column: 1 / -1; border: 1px solid var(--line); border-radius: 10px; background: var(--sunken); }
+  .advanced > summary {
+    display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; list-style: none;
+    font-size: 13px; font-weight: 600; color: var(--ink-2); border-radius: 10px;
+  }
+  .advanced > summary::-webkit-details-marker { display: none; }
+  .advanced > summary::before {
+    content: ""; width: 7px; height: 7px; margin: 0 2px 0 3px; flex: none;
+    border-right: 2px solid var(--ink-3); border-bottom: 2px solid var(--ink-3);
+    transform: rotate(-45deg); transition: transform 0.15s;
+  }
+  .advanced[open] > summary::before { transform: rotate(45deg); }
+  .advanced > summary:hover { color: var(--ink); }
+  .advanced > summary .summary-note { margin-left: auto; font-weight: 400; font-size: 12px; color: var(--ink-3); }
+  .advanced-body { display: grid; gap: 16px; padding: 2px 12px 14px; }
+  .advanced-body .form-group input { background: var(--surface); }
+  .inline-add { display: flex; gap: 6px; }
+  .inline-add input { flex: 1; min-width: 0; }
+  .inline-add .btn { height: 38px; padding: 0 14px; flex: none; }
+
+  /* ---------- Buttons ---------- */
   .btn {
-    padding: 10px 24px; border: none; border-radius: var(--radius); font-size: 14px;
-    font-weight: 600; cursor: pointer; transition: all 0.15s; font-family: var(--font);
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    height: 38px; padding: 0 18px; border-radius: var(--r-ctl); border: 1px solid transparent;
+    font-size: 13.5px; font-weight: 600; white-space: nowrap;
+    transition: background 0.12s, border-color 0.12s, box-shadow 0.12s, transform 0.08s;
   }
-  .btn-start {
-    background: linear-gradient(135deg, var(--accent), #5b7aee);
-    color: #fff; box-shadow: 0 4px 14px var(--accent-glow);
-  }
-  .btn-start:hover { transform: translateY(-1px); box-shadow: 0 6px 20px var(--accent-glow); }
-  .btn-start:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+  .btn:active:not(:disabled) { transform: translateY(1px); }
+  .btn:disabled { opacity: 0.42; cursor: not-allowed; }
+  .btn-start, .btn-rebind { background: var(--accent); color: #fff; box-shadow: 0 1px 2px rgba(20,27,45,0.12); }
+  .btn-start:hover:not(:disabled), .btn-rebind:hover:not(:disabled) { background: var(--accent-strong); }
+  .btn-save { background: var(--surface); color: var(--ink); border-color: var(--line-strong); }
+  .btn-save:hover:not(:disabled) { border-color: var(--ink-3); background: var(--sunken); }
+  .btn .icon { width: 15px; height: 15px; }
 
-  .btn-rebind {
-    background: linear-gradient(135deg, var(--accent2), #8b5cf6);
-    color: #fff; box-shadow: 0 4px 14px var(--accent2-glow);
+  /* ---------- Run pane ---------- */
+  .controls {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding: 16px 20px; border-bottom: 1px solid var(--line);
   }
-  .btn-rebind:hover { transform: translateY(-1px); box-shadow: 0 6px 20px var(--accent2-glow); }
-  .btn-rebind:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+  .controls .spacer { flex: 1; }
 
-  .btn-save { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
-  .btn-save:hover { border-color: var(--accent); }
-  .btn-save:disabled { opacity: 0.4; cursor: not-allowed; }
-
-  .progress-row {
-    display: flex; gap: 24px; margin-left: 16px;
+  .pipeline { display: flex; align-items: center; flex: 1; min-width: 240px; list-style: none; gap: 0; }
+  .progress-step {
+    display: flex; align-items: center; gap: 8px; flex: none;
+    font-size: 13px; font-weight: 600; color: var(--ink-2); white-space: nowrap;
   }
-  .progress-step { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2); }
-  .progress-step .dot {
-    width: 10px; height: 10px; border-radius: 50%; background: var(--border);
-    transition: all 0.3s;
+  .pipe-link { flex: 1; min-width: 24px; height: 2px; margin: 0 10px; border-radius: 2px; background: var(--line); position: relative; overflow: hidden; }
+  .pipe-link::after {
+    content: ''; position: absolute; inset: 0; width: 0; background: var(--ok);
+    transition: width 0.5s ease;
   }
-  .progress-step .dot.active { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
-  .progress-step .dot.done { background: var(--green); box-shadow: 0 0 8px var(--green); }
-  .progress-step .dot.failed { background: var(--red); }
-  .progress-step.rebind-step .dot.active { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+  .progress-step:has(.dot.done) + .pipe-link::after { width: 100%; }
+  .progress-step:has(.dot.active) + .pipe-link {
+    background: repeating-linear-gradient(90deg, var(--accent-line) 0 6px, transparent 6px 12px);
+    background-size: 24px 2px; animation: flow 0.9s linear infinite;
+  }
+  .progress-step:has(.dot.active) { color: var(--accent-strong); }
+  .progress-step:has(.dot.done) { color: var(--ink); }
+  .progress-step:has(.dot.failed) { color: var(--err); }
 
-  /* Logs */
+  .dot {
+    position: relative; width: 16px; height: 16px; flex: none; border-radius: 50%;
+    background: var(--surface); border: 2px solid var(--line-strong);
+    transition: background 0.2s, border-color 0.2s;
+  }
+  .dot.active { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 4px var(--accent-ring); animation: ring 1.6s ease-out infinite; }
+  .dot.done { border-color: var(--ok); background: var(--ok); }
+  .dot.done::after {
+    content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
+    border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  .dot.failed { border-color: var(--err); background: var(--err); }
+  .dot.failed::after {
+    content: ''; position: absolute; left: 3px; right: 3px; top: 5px; height: 2px; background: #fff; border-radius: 1px;
+  }
+
+  .email-warning {
+    display: none; margin: 12px 20px 0; padding: 10px 12px; border-radius: 10px;
+    background: var(--warn-soft); border: 1px solid var(--warn-line); color: var(--warn); font-size: 13px;
+  }
+  .refresh-item-status { padding: 8px 20px; border-bottom: 1px solid var(--line); max-height: 34%; overflow-y: auto; flex: none; }
+  .refresh-item-status:empty { display: none; }
+  .item-status-row { display: flex; align-items: flex-start; gap: 10px; padding: 6px 0; font-size: 13px; color: var(--ink-2); }
+  .item-status-row + .item-status-row { border-top: 1px dashed var(--line); }
+  .item-status-row .dot { width: 10px; height: 10px; margin-top: 4px; border-width: 2px; }
+  .item-status-row .dot.done::after, .item-status-row .dot.failed::after { display: none; }
+  .item-status-row .dot.active { box-shadow: none; animation: pulse 1.4s ease-in-out infinite; }
+
+  .partition-state {
+    padding: 14px 20px; border-bottom: 1px solid var(--line);
+    font-size: 13px; line-height: 1.75; color: var(--ink-2); background: var(--sunken);
+    max-height: 45%; overflow-y: auto; flex: none; overflow-wrap: anywhere;
+  }
+  .partition-state strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- Logs ---------- */
   .logs {
-    flex: 1; overflow-y: auto; padding: 16px 32px;
-    background: var(--bg); font-family: 'SF Mono','Consolas','Cascadia Code',monospace;
-    font-size: 13px; line-height: 1.7;
+    flex: 1; min-height: 0; overflow-y: auto; padding: 14px 20px 18px;
+    font-family: var(--mono); font-size: 12.5px; line-height: 1.7; color: var(--ink);
+    background: var(--surface);
   }
-  .rebind-output {
-    flex: 1; min-height: 0; overflow-y: auto;
-  }
-  #logsRebind {
-    height: 240px; min-height: 120px; flex: none;
-  }
-  .rebind-log-resize-handle {
-    flex: 0 0 10px; position: relative; cursor: ns-resize; touch-action: none;
-  }
+  .log-entry { display: grid; grid-template-columns: 64px 1fr; gap: 12px; padding: 1px 0; }
+  .log-time { color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .log-text { color: var(--ink); overflow-wrap: anywhere; white-space: pre-wrap; }
+  .log-text.success { color: var(--ok); }
+  .log-text.error { color: var(--err); font-weight: 600; }
+  .log-text.warn { color: var(--warn); }
+  .log-text.highlight { color: var(--rebind); font-weight: 600; }
+
+  .rebind-output { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
+  #logsRebind { height: 240px; min-height: 120px; flex: none; }
+  .rebind-log-resize-handle { flex: 0 0 12px; position: relative; cursor: ns-resize; touch-action: none; }
   .rebind-log-resize-handle::before {
-    content: ''; position: absolute; left: 32px; right: 32px; top: 4px;
-    height: 2px; border-radius: 2px; background: var(--border); transition: background 0.15s;
+    content: ''; position: absolute; left: 50%; top: 5px; width: 40px; margin-left: -20px;
+    height: 3px; border-radius: 3px; background: var(--line-strong); transition: background 0.15s;
   }
   .rebind-log-resize-handle:hover::before,
-  .rebind-log-resize-handle.dragging::before { background: var(--accent2); }
-  .log-entry { display: flex; gap: 12px; padding: 2px 0; }
-  .log-time { color: var(--text2); white-space: nowrap; }
-  .log-text { color: var(--text); }
-  .log-text.success { color: var(--green); }
-  .log-text.error { color: var(--red); }
-  .log-text.warn { color: var(--yellow); }
-  .log-text.highlight { color: var(--accent2); }
-
-  /* Plain-language result card (kept separate from the technical log) */
-  .rebind-summary {
-    display: none; margin: 6px 32px 18px; padding: 18px 20px;
-    background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-  }
-  .rebind-summary.visible { display: block; }
-  .rebind-summary.ready { border-color: var(--accent2); }
-  .rebind-summary.success { border-color: var(--green); }
-  .rebind-summary.warning { border-color: var(--yellow); }
-  .rebind-summary.failed { border-color: var(--red); }
-  .rebind-summary-header { display: flex; gap: 12px; align-items: flex-start; }
-  .rebind-summary-icon { font-size: 22px; line-height: 1; }
-  .rebind-summary h3 { font-size: 16px; margin-bottom: 4px; }
-  .rebind-summary-message { color: var(--text2); font-size: 13px; line-height: 1.5; }
-  .rebind-summary-stats {
-    display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); gap: 8px;
-    margin-top: 14px;
-  }
-  .rebind-summary-stat { padding: 10px 12px; background: var(--surface2); border-radius: 8px; }
-  .rebind-summary-stat strong { display: block; font-size: 17px; color: var(--text); }
-  .rebind-summary-stat span { color: var(--text2); font-size: 11px; }
-  .rebind-summary-details { margin-top: 12px; color: var(--text2); font-size: 12px; line-height: 1.6; }
-  .rebind-summary-actions { display: flex; gap: 8px; margin-top: 14px; }
-  .rebind-summary-actions button { padding: 9px 14px; border-radius: 8px; cursor: pointer; font-weight: 600; }
-  .rebind-summary-actions .continue { background: var(--accent2); border: 1px solid var(--accent2); color: white; }
-  .rebind-summary-actions .stop { background: transparent; border: 1px solid var(--border); color: var(--text); }
-  .rebind-summary-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .rebind-log-resize-handle.dragging::before { background: var(--accent); }
 
   .empty-state {
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    height: 100%; color: var(--text2); gap: 12px;
+    height: 100%; min-height: 160px; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px; text-align: center;
+    color: var(--ink-3); font-family: var(--font); font-size: 13px;
   }
-  .empty-state svg { opacity: 0.3; }
+  .empty-state svg { width: 36px; height: 36px; stroke: var(--line-strong); }
 
-  /* MODAL */
+  /* ---------- Rebind summary ---------- */
+  .rebind-summary { display: none; margin: 4px 20px 20px; padding: 18px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); }
+  .rebind-summary.visible { display: block; }
+  .rebind-summary { --tone: var(--ink-2); --tone-soft: var(--sunken); }
+  .rebind-summary.ready { --tone: var(--rebind); --tone-soft: color-mix(in srgb, var(--rebind) 9%, white); border-color: color-mix(in srgb, var(--rebind) 30%, white); }
+  .rebind-summary.success { --tone: var(--ok); --tone-soft: var(--ok-soft); border-color: var(--ok-line); }
+  .rebind-summary.warning { --tone: var(--warn); --tone-soft: var(--warn-soft); border-color: var(--warn-line); }
+  .rebind-summary.failed { --tone: var(--err); --tone-soft: var(--err-soft); border-color: var(--err-line); }
+  .rebind-summary-header { display: flex; gap: 12px; align-items: flex-start; }
+  .rebind-summary-icon {
+    width: 32px; height: 32px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: var(--tone-soft); color: var(--tone); font-size: 15px; font-weight: 700;
+  }
+  .rebind-summary h3 { font-size: 15px; font-weight: 600; margin: 4px 0 2px; }
+  .rebind-summary-message { color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+  .rebind-summary-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 14px; }
+  .rebind-summary-stats:empty { display: none; }
+  .rebind-summary-stat { padding: 10px 12px; border-radius: 10px; background: var(--sunken); }
+  .rebind-summary-stat strong { display: block; font-family: var(--font-display); font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .rebind-summary-stat span { display: block; color: var(--ink-2); font-size: 12px; line-height: 1.35; }
+  .rebind-summary-details { margin-top: 12px; color: var(--ink-2); font-size: 13px; line-height: 1.55; }
+  .rebind-summary-actions { display: flex; gap: 8px; margin-top: 14px; }
+  .rebind-summary-actions button { height: 34px; padding: 0 14px; border-radius: var(--r-ctl); font-size: 13px; font-weight: 600; }
+  .rebind-summary-actions .continue { background: var(--rebind); border: 1px solid var(--rebind); color: #fff; }
+  .rebind-summary-actions .continue:hover { background: color-mix(in srgb, var(--rebind) 82%, black); }
+  .rebind-summary-actions .stop { background: var(--surface); border: 1px solid var(--line-strong); color: var(--ink); }
+  .rebind-summary-actions .stop:hover { border-color: var(--ink-3); }
+  .rebind-summary-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+  /* ---------- Modals ---------- */
   .modal-overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
-    display: none; align-items: center; justify-content: center; z-index: 100;
+    position: fixed; inset: 0; z-index: 100; display: none; align-items: center; justify-content: center;
+    padding: 24px; background: rgba(20,27,45,0.32); backdrop-filter: blur(3px);
   }
-  .modal-overlay.open { display: flex; }
+  .modal-overlay.open { display: flex; animation: fade 0.15s ease-out; }
   .modal {
-    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
-    padding: 28px; width: 480px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    width: 440px; max-width: 100%; padding: 24px; border-radius: 16px;
+    background: var(--surface); border: 1px solid var(--line);
+    box-shadow: 0 24px 64px rgba(20,27,45,0.22);
   }
-  .modal h3 { font-size: 18px; margin-bottom: 20px; }
-  .modal .form-group { margin-bottom: 14px; }
-  .modal .btn-row { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
-  .modal .warn-text { color: var(--yellow); font-size: 13px; margin-bottom: 12px; line-height: 1.5; }
-  .modal .summary-stats { font-size: 13px; color: var(--text2); margin-bottom: 16px; line-height: 1.6; }
-  .modal .summary-stats strong { color: var(--text); }
-
-  /* Help button */
-  .btn-help {
-    width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border);
-    background: var(--surface2); color: var(--text2); cursor: pointer;
-    font-size: 14px; font-weight: 700; font-family: var(--font);
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.15s;
-  }
-  .btn-help:hover { border-color: var(--accent); color: var(--text); background: #2d3345; }
-
-  /* Version pill (bottom-right corner) */
-  .version-pill {
-    position: fixed; bottom: 14px; right: 20px; z-index: 50;
-    padding: 5px 12px; border-radius: 14px;
-    background: var(--surface2); border: 1px solid var(--border);
-    color: var(--text2); font-size: 11px; font-family: var(--font);
-    cursor: pointer; transition: all 0.2s;
-    user-select: none;
-  }
-  .version-pill:hover { border-color: var(--accent2); color: var(--accent2); }
-
-  /* Modal wider variant for help content */
-  .modal-wide { width: 620px; max-width: 92vw; max-height: 80vh; overflow-y: auto; }
-  .modal-wide h4 { color: var(--accent); font-size: 14px; margin: 16px 0 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-  .modal-wide h4:first-child { margin-top: 0; }
-  .modal-wide p, .modal-wide li { font-size: 13px; color: var(--text2); line-height: 1.7; margin-bottom: 6px; }
+  .modal-overlay.open .modal { animation: rise 0.18s ease-out; }
+  .modal h3 { font-family: var(--font-display); font-size: 18px; font-weight: 600; margin-bottom: 16px; }
+  .modal .form-group { margin-bottom: 4px; }
+  .modal .btn-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+  .modal-wide { width: 640px; max-height: 84vh; overflow-y: auto; }
+  .modal-wide h4 { font-size: 14px; font-weight: 600; color: var(--ink); margin: 20px 0 6px; }
+  .modal-wide h4:first-of-type { margin-top: 0; }
+  .modal-wide p, .modal-wide li { font-size: 13.5px; color: var(--ink-2); line-height: 1.65; margin-bottom: 6px; }
+  .modal-wide strong { color: var(--ink); }
   .modal-wide ul { padding-left: 18px; margin-bottom: 10px; }
-  .modal-wide code { background: var(--surface2); padding: 1px 6px; border-radius: 4px; font-size: 12px; }
-  .modal-wide .changelog-entry { margin-bottom: 10px; padding: 10px 14px; background: var(--surface2); border-radius: 8px; border: 1px solid var(--border); }
-  .modal-wide .changelog-entry .ver { font-weight: 700; color: var(--accent2); font-size: 13px; }
-  .modal-wide .changelog-entry .date { font-size: 11px; color: var(--text2); margin-left: 8px; }
-  .modal-wide .changelog-entry ul { margin-top: 4px; }
+  .modal-wide code { font-family: var(--mono); font-size: 12px; background: var(--sunken); border: 1px solid var(--line); padding: 0 5px; border-radius: 4px; }
+  .modal-wide .changelog-entry { position: relative; padding: 0 0 14px 20px; margin-left: 4px; border-left: 2px solid var(--line); }
+  .modal-wide .changelog-entry::before {
+    content: ''; position: absolute; left: -6px; top: 4px; width: 10px; height: 10px; border-radius: 50%;
+    background: var(--surface); border: 2px solid var(--line-strong);
+  }
+  .modal-wide .changelog-entry:first-of-type::before { border-color: var(--accent); background: var(--accent); }
+  .modal-wide .changelog-entry .ver { font-weight: 700; font-size: 13.5px; color: var(--ink); }
+  .modal-wide .changelog-entry .date { font-size: 12px; color: var(--ink-3); margin-left: 8px; }
+  .modal-wide .changelog-entry ul { margin-top: 4px; margin-bottom: 0; }
+
+  /* ---------- Motion ---------- */
+  @keyframes pulse { 50% { opacity: 0.35; } }
+  @keyframes ring { 0% { box-shadow: 0 0 0 0 var(--accent-ring); } 100% { box-shadow: 0 0 0 7px transparent; } }
+  @keyframes flow { to { background-position: 24px 0; } }
+  @keyframes fade { from { opacity: 0; } }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px) scale(0.985); } }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+
+  /* ---------- Smaller windows ---------- */
+  @media (max-width: 1120px) {
+    .main { overflow-y: auto; }
+    .workspace { grid-template-columns: 1fr; flex: none; }
+    .config-pane { overflow: visible; }
+    /* Stacked: keep Start, progress and the log above the long form */
+    .run-pane { order: -1; height: 420px; }
+  }
+  @media (max-width: 760px) {
+    body { flex-direction: column; overflow: auto; height: auto; }
+    .sidebar { width: 100%; border-right: 0; border-bottom: 1px solid var(--line); }
+    .profile-list { max-height: 220px; }
+    .main { overflow: visible; }
+    .main-header { flex-wrap: wrap; padding: 16px; }
+    .auth-banner { margin: 0 16px 12px; flex-wrap: wrap; }
+    .workspace { padding: 0 16px 16px; }
+    .form-area { grid-template-columns: 1fr; padding: 18px 16px; }
+    .rebind-summary-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
 </style>
 </head>
-<body>
+<body data-tab="refresh">
 
 <!-- Sidebar -->
 <aside class="sidebar">
-  <div class="sidebar-header">
+  <div class="brand">
+    <img src="favicon.png" alt="">
     <h1>Power BI Dashboard Control Panel</h1>
-    <p id="sidebarSubtitle">Chained dataflow(s) → semantic model(s)</p>
   </div>
 
-  <!-- Tab toggle -->
-  <div class="tab-toggle">
-    <button class="tab-pill active" id="pillRefresh" onclick="switchTab('refresh')">
-      <span class="pill-icon">&#x21BB;</span> Refresh
+  <div class="tab-toggle" role="tablist" aria-label="Operation">
+    <button class="tab-pill active" id="pillRefresh" role="tab" onclick="switchTab('refresh')">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18.5 2v3.8h-3.8"/><path d="M5.5 22v-3.8h3.8"/></svg>
+      Refresh
     </button>
-    <button class="tab-pill partition" id="pillPartitionRefresh" onclick="switchTab('partition-refresh')">
-      <span class="pill-icon">&#x25F4;</span> Partition
+    <button class="tab-pill partition" id="pillPartitionRefresh" role="tab" onclick="switchTab('partition-refresh')">
+      <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9.5h18"/><path d="M3 15h18"/><path d="M9 4v16"/></svg>
+      Partition
     </button>
-    <button class="tab-pill rebind" id="pillRebind" onclick="switchTab('rebind')">
-      <span class="pill-icon">&#x1F517;</span> Rebind
+    <button class="tab-pill rebind" id="pillRebind" role="tab" onclick="switchTab('rebind')">
+      <svg class="icon" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg>
+      Rebind
     </button>
   </div>
 
-  <!-- Refresh mode: profile list -->
+  <div class="list-heading"><span>Saved profiles</span></div>
+
   <div class="profile-list" id="profileList"></div>
-
   <div class="profile-list" id="partitionRefreshProfileList" style="display:none;"></div>
-
-  <!-- Rebind mode: profile list -->
   <div class="profile-list" id="rebindProfileList" style="display:none;"></div>
 
-  <!-- Rebind mode: info panel -->
   <div class="sidebar-rebind-info" id="rebindInfo" style="display:none;">
-    <h4>PBIP Rebind</h4>
-    <p>Replace workspace, dataflow, and dataset GUIDs across all <code>.tmdl</code> and <code>.json</code> files in a local PBIP report folder.</p>
-    <p><strong>Workflow:</strong></p>
-    <p>1. Enter your old→new GUID mappings<br>
-       2. Click <strong>Scan</strong> — sees what would change<br>
-       3. Review the summary and choose whether to continue with <strong>Apply</strong></p>
-    <p style="margin-top:12px;padding:10px;background:rgba(248,113,113,0.08);border-radius:6px;border:1px solid rgba(248,113,113,0.2);">
-      Changes are applied in-place. Ensure the project is under version control.
-    </p>
+    <h4>How Rebind works</h4>
+    <p>Rebind replaces workspace, dataflow and dataset GUIDs in every <code>.tmdl</code> and <code>.json</code> file of a local PBIP report folder.</p>
+    <ol>
+      <li>Enter the old and new GUID pairs.</li>
+      <li>Click <strong>Scan</strong> to see what would change. Nothing is written.</li>
+      <li>Review the summary, then choose whether to <strong>Apply</strong>.</li>
+    </ol>
+    <p class="note">Apply edits the files in place. Make sure the project is under version control first.</p>
   </div>
 
   <div class="sidebar-actions" id="sidebarActions">
-    <button class="primary" onclick="openNewProfile()">+ New</button>
+    <button class="primary" onclick="openNewProfile()"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New profile</button>
     <button class="danger" onclick="deleteProfile()" id="btnDelete" disabled>Delete</button>
   </div>
-
   <div class="sidebar-actions" id="partitionRefreshSidebarActions" style="display:none;">
-    <button class="primary" onclick="newPartitionRefreshProfile()">+ New</button>
+    <button class="primary" onclick="newPartitionRefreshProfile()"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New profile</button>
     <button class="danger" onclick="deletePartitionRefreshProfile()" id="btnDeletePartitionRefresh" disabled>Delete</button>
   </div>
-
   <div class="sidebar-actions" id="rebindSidebarActions" style="display:none;">
-    <button class="primary" onclick="openNewRebindProfile()">+ New</button>
+    <button class="primary" onclick="openNewRebindProfile()"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New profile</button>
     <button class="danger" onclick="deleteRebindProfile()" id="btnDeleteRebind" disabled>Delete</button>
+  </div>
+
+  <div class="sidebar-foot">
+    <span>&copy; Alex Paraschakis</span>
+    <button class="version-pill" onclick="openVersion()" title="Версии и изменения">v0.5.0</button>
   </div>
 </aside>
 
 <!-- Main -->
 <main class="main">
-  <div class="main-header" id="mainHeader">
-    <h2 id="pageTitle">Select or create a profile</h2>
-    <div style="display:flex;gap:8px;align-items:center;">
-      <span class="status-badge" id="authBadge" style="font-size:11px;">Checking...</span>
-      <span class="status-badge" id="statusBadge">Idle</span>
-      <button class="btn-help" onclick="openHelp()" title="Справка">?</button>
+  <header class="main-header" id="mainHeader">
+    <div class="title-block">
+      <h2 id="pageTitle">Select or create a profile</h2>
+      <p class="subtitle" id="sidebarSubtitle">Chained dataflow(s) → semantic model(s)</p>
     </div>
-  </div>
+    <div class="header-meta">
+      <span class="status-badge" id="authBadge">Checking sign-in</span>
+      <span class="status-badge" id="statusBadge" aria-live="polite">Idle</span>
+      <button class="btn-help" onclick="openHelp()" title="Справка" aria-label="Справка">?</button>
+    </div>
+  </header>
 
-  <div class="auth-banner" id="authBanner" style="display:none;">
-    <span id="authMessage">&#x26A0; Refresh and Partition Refresh require authentication. Rebind does not.</span>
+  <div class="auth-banner" id="authBanner" role="status">
+    <svg class="icon" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+    <span id="authMessage">Refresh and Partition Refresh need sign-in (device code or this PC's certificate). Rebind does not.</span>
     <button id="btnAuth" onclick="authenticateRefresh()">Authenticate for Refresh</button>
   </div>
 
-  <!-- Refresh mode form -->
-  <div class="form-area" id="formRefresh">
-    <div class="form-group full">
-      <label>Profile name</label>
-      <input type="text" id="profileName" placeholder="e.g., My Profile">
-    </div>
-    <div class="form-group full">
-      <label>Workspace ID</label>
-      <input type="text" id="workspaceId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-    </div>
-    <div class="form-group full">
-      <label>Dataflow IDs</label>
-      <div id="dfList"></div>
-      <button class="btn-add-mapping" onclick="addDataflow()" style="margin-top:6px;">+ Add Dataflow</button>
-    </div>
-    <div class="form-group full">
-      <label>Semantic models</label>
-      <div id="semanticModelList"></div>
-      <button class="btn-add-mapping" onclick="addSemanticModel()" style="margin-top:6px;">+ Add Semantic Model</button>
-    </div>
-    <div class="form-group full">
-      <label>Notify colleagues</label>
-      <input type="text" id="notifyEmails" placeholder="colleague@example.com; teammate@example.com" oninput="validateNotifyEmails(false)">
-      <span class="field-error" id="notifyEmailsError"></span>
-      <label class="check-row" style="text-transform:none;letter-spacing:0;font-weight:400;">
-        <input type="checkbox" id="emailDryRun"> Dry run: preview notification in the log without sending
-      </label>
-    </div>
-  </div>
+  <div class="workspace">
+    <!-- Configuration -->
+    <section class="pane config-pane" aria-label="Profile settings">
 
-  <div class="form-area" id="formPartitionRefresh" style="display:none;">
-    <div class="form-group full">
-      <label>Profile name</label>
-      <input type="text" id="partitionProfileName" placeholder="e.g., Historical sales partitions">
-    </div>
-    <div class="form-group">
-      <label>Workspace ID</label>
-      <input type="text" id="partitionWorkspaceId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-    </div>
-    <div class="form-group">
-      <label>Semantic model / Dataset ID</label>
-      <input type="text" id="partitionDatasetId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx">
-    </div>
-    <div class="form-group full">
-      <label>Exact table name</label>
-      <input type="text" id="partitionTableName" placeholder="Exact model table name">
-    </div>
-    <div class="form-group full">
-      <label>Exact partition names (one per line)</label>
-      <textarea id="partitionNames" placeholder="2022&#10;2023&#10;2024"></textarea>
-      <span class="field-error">Names are sent exactly as entered. Blank and duplicate lines are rejected.</span>
-    </div>
-  </div>
-
-  <!-- Rebind mode form -->
-  <div class="form-area" id="formRebind" style="display:none;">
-    <div class="form-group full">
-      <label>Profile name</label>
-      <input type="text" id="rebindProfileName" placeholder="e.g., MyProject dev → test">
-    </div>
-    <div class="form-group full">
-      <label>Report folder path</label>
-      <div class="folder-picker">
-        <input type="text" id="reportPath" placeholder="C:\Projects\MyProject" style="flex:1;" oninput="onPathChange()">
-      </div>
-      <span class="field-error" id="pathError"></span>
-    </div>
-
-    <div class="form-group full">
-      <label>ID Mappings</label>
-      <div id="mappingList"></div>
-      <button class="btn-add-mapping" onclick="addMapping()">+ Add Mapping</button>
-    </div>
-  </div>
-
-  <!-- Refresh controls -->
-  <div class="controls" id="controlsRefresh">
-    <button class="btn btn-start" id="btnStart" onclick="startRefresh()" disabled>Start Refresh</button>
-    <button class="btn btn-save" onclick="saveProfile()">Save Profile</button>
-    <div class="progress-row" id="progressRow">
-      <div class="progress-step">
-        <span class="dot" id="dotDataflow"></span> Dataflow
-      </div>
-      <div class="progress-step">
-        <span class="dot" id="dotDataset"></span> Semantic models
-      </div>
-    </div>
-  </div>
-  <div class="email-warning" id="emailWarning"></div>
-  <div class="refresh-item-status" id="semanticStatusList"></div>
-
-  <div class="controls" id="controlsPartitionRefresh" style="display:none;">
-    <button class="btn btn-start" id="btnStartPartitionRefresh" onclick="startPartitionRefresh()">Start Partition Refresh</button>
-    <button class="btn btn-save" onclick="savePartitionRefreshProfile()">Save Profile</button>
-    <button class="btn btn-save" onclick="loadPartitionRefreshHistory()">Refresh History</button>
-  </div>
-
-  <div class="partition-state" id="partitionRefreshState" style="display:none;">
-    No partition refresh request has been loaded. Status checks use GET and never resubmit.
-  </div>
-
-  <!-- Rebind controls -->
-  <div class="controls" id="controlsRebind" style="display:none;">
-    <button class="btn btn-rebind" id="btnScan" onclick="startScan()" disabled>Scan</button>
-    <button class="btn btn-rebind" id="btnApply" onclick="startApply()" disabled>Apply</button>
-    <button class="btn btn-save" onclick="saveRebindProfile()">Save Profile</button>
-    <div class="progress-row">
-      <div class="progress-step rebind-step">
-        <span class="dot" id="dotScan"></span> Scan
-      </div>
-      <div class="progress-step rebind-step">
-        <span class="dot" id="dotReplace"></span> Replace
-      </div>
-      <div class="progress-step rebind-step">
-        <span class="dot" id="dotVerify"></span> Verify
-      </div>
-    </div>
-  </div>
-
-  <!-- Log panel: Refresh -->
-  <div class="logs" id="logsRefresh">
-    <div class="empty-state">
-      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
-      <span>Log output will appear here</span>
-    </div>
-  </div>
-  <div class="logs" id="logsPartitionRefresh" style="display:none;">
-    <div class="empty-state"><span>Partition refresh status and history will appear here</span></div>
-  </div>
-  <!-- Log panel: Rebind -->
-  <div class="rebind-output" id="rebindOutput" style="display:none;">
-    <div class="logs" id="logsRebind">
-      <div class="empty-state">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg>
-        <span>Log output will appear here</span>
-      </div>
-    </div>
-    <div class="rebind-log-resize-handle" id="rebindLogResizeHandle" role="separator" aria-orientation="horizontal" aria-label="Resize Rebind log"></div>
-    <section class="rebind-summary" id="rebindSummary" aria-live="polite">
-      <div class="rebind-summary-header">
-        <div class="rebind-summary-icon" id="rebindSummaryIcon"></div>
-        <div>
-          <h3 id="rebindSummaryTitle"></h3>
-          <div class="rebind-summary-message" id="rebindSummaryMessage"></div>
+      <div class="form-area" id="formRefresh">
+        <div class="form-group full">
+          <label for="profileName">Profile name</label>
+          <input type="text" id="profileName" placeholder="e.g. Sales Dashboard, nightly">
+        </div>
+        <div class="form-group full">
+          <label for="wsPickerInput">Workspace</label>
+          <span class="hint">Where to look for reports, semantic models and dataflows. A profile can mix items from several workspaces.</span>
+          <div class="picker">
+            <input type="text" class="picker-input" id="wsPickerInput" role="combobox" aria-expanded="false" aria-controls="wsPickerList" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Search workspaces" onfocus="pickerOpen('ws')" oninput="pickerFilter('ws')" onkeydown="pickerKey(event,'ws')" onblur="pickerBlur('ws')">
+            <ul class="picker-list" id="wsPickerList" role="listbox" aria-label="Workspaces" hidden></ul>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-group">
+            <span class="label">Semantic models</span>
+            <span class="hint">Pick a report or a semantic model. The dataflows it reads from are found and added for you.</span>
+            <div class="item-list" id="semanticModelList"></div>
+            <div class="picker">
+              <input type="text" class="picker-input" id="modelPickerInput" role="combobox" aria-expanded="false" aria-controls="modelPickerList" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Add a report or semantic model" onfocus="pickerOpen('model')" oninput="pickerFilter('model')" onkeydown="pickerKey(event,'model')" onblur="pickerBlur('model')">
+              <ul class="picker-list" id="modelPickerList" role="listbox" aria-label="Reports and semantic models" hidden></ul>
+            </div>
+            <p class="picker-note" id="refreshPickerNote" role="status" aria-live="polite"></p>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-group">
+            <span class="label">Dataflows</span>
+            <span class="hint">All dataflows run first, at the same time. The semantic models start once every dataflow has succeeded.</span>
+            <div class="item-list" id="dfList"></div>
+            <div class="picker">
+              <input type="text" class="picker-input" id="dfPickerInput" role="combobox" aria-expanded="false" aria-controls="dfPickerList" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Add a dataflow" onfocus="pickerOpen('df')" oninput="pickerFilter('df')" onkeydown="pickerKey(event,'df')" onblur="pickerBlur('df')">
+              <ul class="picker-list" id="dfPickerList" role="listbox" aria-label="Dataflows" hidden></ul>
+            </div>
+            <label class="check-row">
+              <input type="checkbox" id="modelOnly" onchange="updateModelOnlyUI()">
+              <span><strong>Model only.</strong> Refresh the semantic models and skip the dataflows. Applies to this run only and is not saved.</span>
+            </label>
+          </div>
+        </div>
+        <div class="form-section">
+          <div class="form-group">
+            <label for="notifyEmails">Notify colleagues</label>
+            <span class="hint">One summary email after the run. Separate addresses with a semicolon or comma.</span>
+            <input type="text" id="notifyEmails" placeholder="name@company.com; colleague@company.com" oninput="validateNotifyEmails(false)">
+            <span class="field-error" id="notifyEmailsError"></span>
+            <label class="check-row">
+              <input type="checkbox" id="emailDryRun">
+              <span><strong>Dry run.</strong> Preview the email in the log without sending it.</span>
+            </label>
+          </div>
+        </div>
+        <details class="advanced" id="refreshAdvanced">
+          <summary>IDs and manual entry <span class="summary-note">For pasting GUIDs</span></summary>
+          <div class="advanced-body">
+            <div class="form-group">
+              <label for="workspaceId">Workspace ID</label>
+              <input type="text" id="workspaceId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false" oninput="onWorkspaceIdTyped()">
+              <span class="field-note">The workspace above. Dataflows added by ID belong to it.</span>
+            </div>
+            <div class="form-group">
+              <label for="manualDataflowId">Add a dataflow by ID</label>
+              <div class="inline-add">
+                <input type="text" id="manualDataflowId" placeholder="Dataflow GUID" spellcheck="false">
+                <button class="btn btn-save" onclick="addDataflowById()">Add</button>
+              </div>
+            </div>
+            <div class="form-group">
+              <label for="manualModelDatasetId">Add a semantic model by ID</label>
+              <div class="inline-add">
+                <input type="text" id="manualModelWorkspaceId" placeholder="Workspace GUID" spellcheck="false" aria-label="Semantic model workspace GUID">
+                <input type="text" id="manualModelDatasetId" placeholder="Dataset GUID" spellcheck="false">
+                <button class="btn btn-save" onclick="addModelById()">Add</button>
+              </div>
+              <span class="field-error" id="manualAddError"></span>
+            </div>
+          </div>
+        </details>
+        <div class="form-footer">
+          <button class="btn btn-save" onclick="saveProfile()">Save Profile</button>
         </div>
       </div>
-      <div class="rebind-summary-stats" id="rebindSummaryStats"></div>
-      <div class="rebind-summary-details" id="rebindSummaryDetails"></div>
-      <div class="rebind-summary-actions">
-        <button class="continue" id="btnSummaryApply" onclick="startApply()">Continue with Apply</button>
-        <button class="stop" id="btnSummaryStop" onclick="declineRebind()">Do not continue</button>
-        <button class="stop" id="btnSummaryReset" onclick="resetRebindWorkflow()" style="display:none;">Run another scan</button>
+
+      <div class="form-area" id="formPartitionRefresh" style="display:none;">
+        <div class="form-group full">
+          <label for="partitionProfileName">Profile name</label>
+          <input type="text" id="partitionProfileName" placeholder="e.g. Historical sales partitions">
+        </div>
+        <div class="form-group">
+          <label for="pwsPickerInput">Workspace</label>
+          <div class="picker">
+            <input type="text" class="picker-input" id="pwsPickerInput" role="combobox" aria-expanded="false" aria-controls="pwsPickerList" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Search workspaces" onfocus="pickerOpen('pws')" oninput="pickerFilter('pws')" onkeydown="pickerKey(event,'pws')" onblur="pickerBlur('pws')">
+            <ul class="picker-list" id="pwsPickerList" role="listbox" aria-label="Workspaces" hidden></ul>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="pmodelPickerInput">Semantic model</label>
+          <div class="picker">
+            <input type="text" class="picker-input" id="pmodelPickerInput" role="combobox" aria-expanded="false" aria-controls="pmodelPickerList" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Search semantic models" onfocus="pickerOpen('pmodel')" oninput="pickerFilter('pmodel')" onkeydown="pickerKey(event,'pmodel')" onblur="pickerBlur('pmodel')">
+            <ul class="picker-list" id="pmodelPickerList" role="listbox" aria-label="Semantic models" hidden></ul>
+          </div>
+        </div>
+        <p class="picker-note" id="partitionPickerNote" role="status" aria-live="polite" style="grid-column:1 / -1;"></p>
+        <div class="form-group full">
+          <label for="partitionTableName">Exact table name</label>
+          <input type="text" id="partitionTableName" placeholder="Exact model table name" spellcheck="false">
+        </div>
+        <div class="form-group full">
+          <label for="partitionNames">Exact partition names, one per line</label>
+          <textarea id="partitionNames" placeholder="2022&#10;2023&#10;2024" spellcheck="false"></textarea>
+          <span class="field-note">Names are sent exactly as entered. Blank and duplicate lines are rejected.</span>
+        </div>
+        <details class="advanced" id="partitionAdvanced">
+          <summary>IDs <span class="summary-note">For pasting GUIDs</span></summary>
+          <div class="advanced-body">
+            <div class="form-group">
+              <label for="partitionWorkspaceId">Workspace ID</label>
+              <input type="text" id="partitionWorkspaceId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false" oninput="onPartitionIdsTyped()">
+            </div>
+            <div class="form-group">
+              <label for="partitionDatasetId">Semantic model / dataset ID</label>
+              <input type="text" id="partitionDatasetId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" spellcheck="false" oninput="onPartitionIdsTyped()">
+            </div>
+          </div>
+        </details>
+        <div class="form-footer">
+          <button class="btn btn-save" onclick="savePartitionRefreshProfile()">Save Profile</button>
+        </div>
+      </div>
+
+      <div class="form-area" id="formRebind" style="display:none;">
+        <div class="form-group full">
+          <label for="rebindProfileName">Profile name</label>
+          <input type="text" id="rebindProfileName" placeholder="e.g. MyProject dev to test">
+        </div>
+        <div class="form-group full">
+          <label for="reportPath">Report folder path</label>
+          <div class="folder-picker">
+            <input type="text" id="reportPath" placeholder="C:\Projects\MyProject" spellcheck="false" oninput="onPathChange()">
+          </div>
+          <span class="field-error" id="pathError"></span>
+        </div>
+        <div class="form-section">
+          <div class="form-group">
+            <span class="label">ID mappings</span>
+            <span class="hint">Each old GUID is replaced by its new GUID. Use the swap button to reverse a pair.</span>
+            <div id="mappingList"></div>
+            <button class="btn-add-mapping" onclick="addMapping()"><svg class="icon" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>Add mapping</button>
+          </div>
+        </div>
+        <div class="form-footer">
+          <button class="btn btn-save" onclick="saveRebindProfile()">Save Profile</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Run -->
+    <section class="pane run-pane" aria-label="Run">
+      <div class="controls" id="controlsRefresh">
+        <ol class="pipeline" id="progressRow" aria-label="Refresh progress">
+          <li class="progress-step"><span class="dot" id="dotDataflow"></span><span id="dotDataflowLabel">Dataflow</span></li>
+          <li class="pipe-link" aria-hidden="true"></li>
+          <li class="progress-step"><span class="dot" id="dotDataset"></span><span>Semantic models</span></li>
+        </ol>
+        <button class="btn btn-start" id="btnStart" onclick="startRefresh()" disabled>
+          <svg class="icon" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/></svg>Start Refresh
+        </button>
+      </div>
+      <div class="email-warning" id="emailWarning"></div>
+      <div class="refresh-item-status" id="semanticStatusList"></div>
+
+      <div class="controls" id="controlsPartitionRefresh" style="display:none;">
+        <button class="btn btn-start" id="btnStartPartitionRefresh" onclick="startPartitionRefresh()">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z" fill="currentColor" stroke="none"/></svg>Start Partition Refresh
+        </button>
+        <button class="btn btn-save" onclick="loadPartitionRefreshHistory()">Refresh History</button>
+      </div>
+      <div class="partition-state" id="partitionRefreshState" style="display:none;">
+        No partition refresh request has been loaded. Status checks use GET and never resubmit.
+      </div>
+
+      <div class="controls" id="controlsRebind" style="display:none;">
+        <ol class="pipeline" aria-label="Rebind progress">
+          <li class="progress-step rebind-step"><span class="dot" id="dotScan"></span>Scan</li>
+          <li class="pipe-link" aria-hidden="true"></li>
+          <li class="progress-step rebind-step"><span class="dot" id="dotReplace"></span>Replace</li>
+          <li class="pipe-link" aria-hidden="true"></li>
+          <li class="progress-step rebind-step"><span class="dot" id="dotVerify"></span>Verify</li>
+        </ol>
+        <button class="btn btn-rebind" id="btnScan" onclick="startScan()" disabled>Scan</button>
+        <button class="btn btn-save" id="btnApply" onclick="startApply()" disabled>Apply</button>
+      </div>
+
+      <div class="logs" id="logsRefresh">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>
+          <span>The run log appears here after you start a refresh.</span>
+        </div>
+      </div>
+      <div class="logs" id="logsPartitionRefresh" style="display:none;">
+        <div class="empty-state"><span>Partition refresh status and history will appear here</span></div>
+      </div>
+      <div class="rebind-output" id="rebindOutput" style="display:none;">
+        <div class="logs" id="logsRebind">
+          <div class="empty-state">
+            <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5" stroke-linecap="round"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h4"/></svg>
+            <span>Scan results and the change log appear here.</span>
+          </div>
+        </div>
+        <div class="rebind-log-resize-handle" id="rebindLogResizeHandle" role="separator" aria-orientation="horizontal" aria-label="Resize Rebind log"></div>
+        <section class="rebind-summary" id="rebindSummary" aria-live="polite">
+          <div class="rebind-summary-header">
+            <div class="rebind-summary-icon" id="rebindSummaryIcon"></div>
+            <div>
+              <h3 id="rebindSummaryTitle"></h3>
+              <div class="rebind-summary-message" id="rebindSummaryMessage"></div>
+            </div>
+          </div>
+          <div class="rebind-summary-stats" id="rebindSummaryStats"></div>
+          <div class="rebind-summary-details" id="rebindSummaryDetails"></div>
+          <div class="rebind-summary-actions">
+            <button class="continue" id="btnSummaryApply" onclick="startApply()">Continue with Apply</button>
+            <button class="stop" id="btnSummaryStop" onclick="declineRebind()">Do not continue</button>
+            <button class="stop" id="btnSummaryReset" onclick="resetRebindWorkflow()" style="display:none;">Run another scan</button>
+          </div>
+        </section>
       </div>
     </section>
   </div>
 </main>
 
-<!-- Version pill (bottom-right) -->
-<div class="version-pill" onclick="openVersion()" title="Версии и изменения">v0.5.0</div>
-
 <!-- Version / Changelog Modal -->
-<div class="modal-overlay" id="modalVersion">
+<div class="modal-overlay" id="modalVersion" role="dialog" aria-modal="true" aria-labelledby="modalVersionTitle">
   <div class="modal modal-wide">
-    <h3>📋 Версии и изменения</h3>
+    <h3 id="modalVersionTitle">Версии и изменения</h3>
     <div class="changelog-entry">
       <span class="ver">v0.5.0</span><span class="date">21 сентября 2026</span>
       <ul>
@@ -665,13 +938,13 @@
       <ul>
         <li>Rebind и браузер запускаются без входа; аутентификация требуется только для Refresh</li>
         <li>После Scan и Apply показывается понятное резюме с явным выбором продолжить или остановиться</li>
-        <li>Добавлена защита от применения изменённых после Scan параметров и параллельных запусков</li>
+        <li>Добавлена защита от применения измененных после Scan параметров и параллельных запусков</li>
       </ul>
     </div>
     <div class="changelog-entry">
       <span class="ver">v0.2.0</span><span class="date">22 июня 2026</span>
       <ul>
-        <li>Раздельные логи для вкладок Refresh и Rebind — каждая вкладка ведёт свой журнал</li>
+        <li>Раздельные логи для вкладок Refresh и Rebind - каждая вкладка ведет свой журнал</li>
         <li>Исправлено зависание логов при переключении между вкладками во время выполнения задач</li>
         <li>Добавлена кнопка справки (<strong>?</strong>) и окно версий (это окно)</li>
         <li>Справка и описание версий на русском языке</li>
@@ -681,28 +954,25 @@
       <span class="ver">v0.1.0</span><span class="date">май 2026</span>
       <ul>
         <li>Первая версия панели управления</li>
-        <li><strong>Refresh</strong> — цепочка обновлений Dataflow → Semantic models через Power BI REST API</li>
+        <li><strong>Refresh</strong> - цепочка обновлений Dataflow → Semantic models через Power BI REST API</li>
         <li>Аутентификация через MSAL.PS (Device Code)</li>
       </ul>
     </div>
     <div class="btn-row">
       <button class="btn btn-save" onclick="closeModal('modalVersion')">Закрыть</button>
     </div>
-    <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);text-align:center;font-size:12px;color:var(--text2);">
-      &copy; 2026 Alex Paraschakis
-    </div>
   </div>
 </div>
 
 <!-- Help Modal -->
-<div class="modal-overlay" id="modalHelp">
+<div class="modal-overlay" id="modalHelp" role="dialog" aria-modal="true" aria-labelledby="modalHelpTitle">
   <div class="modal modal-wide">
-    <h3>❓ Справка</h3>
+    <h3 id="modalHelpTitle">Справка</h3>
     <h4>Что это такое</h4>
     <p>Панель управления для двух независимых операций с Power BI / Fabric:</p>
     <ul>
-      <li><strong>Refresh</strong> — обновление нескольких Dataflow, затем нескольких семантических моделей через Power BI REST API. Модели запускаются только после успешного завершения всех dataflow.</li>
-      <li><strong>Rebind</strong> — замена GUID рабочих областей и dataflow в исходном коде PBIP-проекта. Сканирует <code>.tmdl</code> файлы семантической модели, находит старые GUID, заменяет на новые, и проверяет результат.</li>
+      <li><strong>Refresh</strong> - обновление нескольких Dataflow, затем нескольких семантических моделей через Power BI REST API. Модели запускаются только после успешного завершения всех dataflow. Флажок <strong>Model only</strong> обновляет только модели, без dataflow; он действует на один запуск и не сохраняется в профиле. Рабочие области, отчеты, модели и dataflow выбираются поиском по названию; при выборе отчета или модели ее dataflow добавляются сами (по lineage). GUID можно вставить в свернутом разделе <strong>IDs and manual entry</strong>.</li>
+      <li><strong>Rebind</strong> - замена GUID рабочих областей и dataflow в исходном коде PBIP-проекта. Сканирует <code>.tmdl</code> файлы семантической модели, находит старые GUID, заменяет на новые, и проверяет результат.</li>
     </ul>
 
     <h4>Вкладка Refresh</h4>
@@ -710,53 +980,55 @@
     <ul>
       <li>Запуск всех dataflow одновременно</li>
       <li>Ожидание завершения всех (проверка каждые 30 секунд)</li>
-      <li>После успешного завершения всех dataflow — параллельный запуск всех семантических моделей</li>
+      <li>После успешного завершения всех dataflow - параллельный запуск всех семантических моделей</li>
       <li>Каждая модель показывает собственный статус; ошибка одной не отменяет остальные</li>
       <li>Если заполнено Notify colleagues, после цепочки отправляется одно итоговое письмо через Power Automate</li>
-      <li>Прогресс отображается точками: синяя = в процессе, зелёная = готово, красная = ошибка</li>
+      <li>Прогресс отображается точками: синяя = в процессе, зеленая = готово, красная = ошибка</li>
     </ul>
     <p><strong>Что нужно:</strong> доступ к рабочей области Power BI / Fabric (роль Member или выше), установленный модуль MSAL.PS.</p>
-    <p><strong>Тайминги:</strong> статус dataflow и каждой семантической модели проверяется каждые <strong>30 секунд</strong>. Максимальное общее время ожидания — <strong>11 часов</strong>. Если за это время обновление не завершилось — таймаут и ошибка. Сами операции выполняются на стороне Fabric, так что время зависит от объёма данных и загрузки capacity.</p>
+    <p><strong>Тайминги:</strong> статус dataflow и каждой семантической модели проверяется каждые <strong>30 секунд</strong>. Максимальное общее время ожидания - <strong>11 часов</strong>. Если за это время обновление не завершилось - таймаут и ошибка. Сами операции выполняются на стороне Fabric, так что время зависит от объема данных и загрузки capacity.</p>
 
     <h4>Вкладка Rebind</h4>
     <p><strong>Двухшаговый процесс:</strong></p>
     <ul>
-      <li><strong>Scan</strong> (только чтение) — находит все вхождения старых GUID в <code>.tmdl</code> и <code>.json</code> файлах. Показывает контекст для каждого совпадения. <em>Не изменяет проект.</em></li>
-      <li><strong>Apply</strong> (замена + проверка) — заменяет старые GUID на новые во всех затронутых файлах, затем проверяет, что старых GUID не осталось.</li>
+      <li><strong>Scan</strong> (только чтение) - находит все вхождения старых GUID в <code>.tmdl</code> и <code>.json</code> файлах. Показывает контекст для каждого совпадения. <em>Не изменяет проект.</em></li>
+      <li><strong>Apply</strong> (замена + проверка) - заменяет старые GUID на новые во всех затронутых файлах, затем проверяет, что старых GUID не осталось.</li>
     </ul>
-    <p><strong>Важно:</strong> после Scan просмотрите отдельное понятное резюме под техническим логом и выберите, продолжить Apply или остановиться. Изменения применяются на месте — убедитесь, что проект под версионным контролем.</p>
+    <p><strong>Важно:</strong> после Scan просмотрите отдельное понятное резюме под техническим логом и выберите, продолжить Apply или остановиться. Изменения применяются на месте - убедитесь, что проект под версионным контролем.</p>
 
     <h4>Аутентификация</h4>
-    <p>Сервер и браузер запускаются без входа. Только после нажатия <strong>«Authenticate for Refresh»</strong> сервер пытается получить токен доступа:</p>
+    <p>Сервер и окно панели запускаются без входа. Для Refresh есть два равноправных способа входа; способ выбирается на каждом компьютере в <code>setup.bat</code>:</p>
     <ul>
-      <li><strong>Кэш MSAL</strong> — если вы уже входили на этом компьютере, токен находится мгновенно</li>
-      <li><strong>Файл .token</strong> — сохранённый токен с прошлого запуска</li>
-      <li><strong>Device Code</strong> — если оба способа не сработали, в консоли появится код устройства. Откройте <code>https://login.microsoft.com/device</code> и введите код</li>
+      <li><strong>Device code</strong> - для тех, кто запускает обновления вручную. Вход под своей учетной записью (свои права, свое имя в журнале обновлений). Нажмите «Authenticate for Refresh», откройте <code>https://login.microsoft.com/device</code> и введите код из консоли; вход сохраняется в зашифрованном кэше</li>
+      <li><strong>Сертификат (service principal)</strong> - для компьютеров, где обновления идут без участия человека. <code>setup.bat</code> создает сертификат с неэкспортируемым ключом на этом компьютере и задает переменные <code>POWERBI_REFRESH_AUTH_MODE</code>, <code>POWERBI_REFRESH_TENANT_ID</code>, <code>POWERBI_REFRESH_CLIENT_ID</code>, <code>POWERBI_REFRESH_CERT_THUMBPRINT</code>; владелец приложения загружает его открытую часть (<code>.cer</code>). Вход не нужен</li>
     </ul>
-    <p>Вкладка <strong>Rebind не требует аутентификации или MSAL.PS</strong> — она работает только с локальными файлами.</p>
+    <p>Если заданы переменные сертификата, используется сертификат, иначе device code; <code>POWERBI_REFRESH_AUTH_MODE</code> задает способ явно. <code>setup.bat -CheckOnly</code> проверяет готовность, ничего не меняя.</p>
+    <p>Вкладка <strong>Rebind не требует аутентификации или MSAL.PS</strong> - она работает только с локальными файлами.</p>
 
     <h4>Где что лежит</h4>
     <ul>
-      <li><code>launch.bat</code> — запуск сервера (двойной клик)</li>
-      <li><code>server.ps1</code> — HTTP-сервер и API-логика</li>
-      <li><code>index.html</code> — веб-интерфейс</li>
-      <li><code>profiles.json</code> — локальные сохранённые профили Refresh (не добавляйте в Git)</li>
-      <li><code>rebind-profiles.json</code> — локальные сохранённые профили Rebind (не добавляйте в Git)</li>
-      <li><code>_refresh-worker-template.ps1</code> — шаблон для генерации refresh worker</li>
-      <li><code>logs/</code> — папка с логами ошибок</li>
+      <li><code>setup.bat</code> - установка для текущего пользователя и проверка готовности</li>
+      <li><code>launch-app.bat</code> - запуск панели в отдельном окне (на него указывают ярлыки)</li>
+      <li><code>launch.bat</code> - запуск сервера в видимой консоли</li>
+      <li><code>server.ps1</code> - HTTP-сервер и API-логика</li>
+      <li><code>index.html</code> - веб-интерфейс</li>
+      <li><code>profiles.json</code> - сохраненные профили Refresh</li>
+      <li><code>rebind-profiles.json</code> - сохраненные профили Rebind</li>
+      <li><code>runtime\</code> - общий движок обновления (тот же, что у Claude-скилла)</li>
+      <li><code>validation\</code> - проверки до и после обновления и письмо о результате</li>
+      <li><code>logs/</code> - папка с логами ошибок</li>
     </ul>
 
     <h4>Типичные проблемы</h4>
     <ul>
-      <li><strong>Браузер открывается, но страница не грузится</strong> — подождите 5 секунд, обновите страницу</li>
-      <li><strong>«Not Authenticated» после входа</strong> — закройте консоль, запустите <code>launch.bat</code> заново</li>
-      <li><strong>«Not Authenticated» на вкладке Rebind</strong> — нормально, Rebind не требует аутентификации</li>
-      <li><strong>Ошибка «Dataflow refresh FAILED»</strong> — проверьте роль в рабочей области (нужен Member или выше)</li>
-      <li><strong>Rebind: кнопка Apply неактивна</strong> — сначала выполните Scan и дождитесь «SCAN COMPLETE» в логах</li>
-      <li><strong>Refresh: статус «Starting...» и ничего не происходит</strong> — проверьте <code>logs\worker-start.log</code></li>
-      <li><strong>Порт 8765 занят</strong> — закройте другие экземпляры сервера</li>
+      <li><strong>Браузер открывается, но страница не грузится</strong> - подождите 5 секунд, обновите страницу</li>
+      <li><strong>«Not Authenticated» после входа</strong> - закройте окно панели и запустите ярлык заново; <code>setup.bat -CheckOnly</code> покажет причину</li>
+      <li><strong>«Not Authenticated» на вкладке Rebind</strong> - нормально, Rebind не требует аутентификации</li>
+      <li><strong>Ошибка «Dataflow refresh FAILED»</strong> - проверьте роль в рабочей области (нужен Member или выше)</li>
+      <li><strong>Rebind: кнопка Apply неактивна</strong> - сначала выполните Scan и дождитесь «SCAN COMPLETE» в логах</li>
+      <li><strong>Refresh: статус «Starting...» и ничего не происходит</strong> - проверьте <code>logs\worker-start.log</code></li>
+      <li><strong>Порт 8765 занят</strong> - закройте другие экземпляры сервера</li>
     </ul>
-
     <div class="btn-row">
       <button class="btn btn-save" onclick="closeModal('modalHelp')">Закрыть</button>
     </div>
@@ -764,12 +1036,13 @@
 </div>
 
 <!-- New Profile Modal -->
-<div class="modal-overlay" id="modalNew">
+<div class="modal-overlay" id="modalNew" role="dialog" aria-modal="true" aria-labelledby="modalNewTitle">
   <div class="modal">
-    <h3>New Profile</h3>
+    <h3 id="modalNewTitle">New profile</h3>
     <div class="form-group">
-      <label>Profile name</label>
-      <input type="text" id="modalName" placeholder="e.g., My Profile">
+      <label for="modalName">Profile name</label>
+      <input type="text" id="modalName" placeholder="e.g. Sales Dashboard, nightly">
+      <span class="field-note">The new profile starts from the settings currently in the form.</span>
     </div>
     <div class="btn-row">
       <button class="btn btn-save" onclick="closeModal('modalNew')">Cancel</button>
@@ -809,17 +1082,23 @@ let partitionRefreshLastCheckedRequestId = '';
 // ============================================================
 async function init() {
   initializeRebindLogResize();
+  initializeModals();
   // Restore dataflows from localStorage
+  // Unsaved form rows survive a reload; blank rows from the old GUID form are dropped.
   const savedDfs = localStorage.getItem('refresh-dataflows');
   if (savedDfs) {
     try { dataflows = JSON.parse(savedDfs); } catch(e) { dataflows = []; }
   }
-  if (dataflows.length === 0) { addDataflow(); }
+  if (!Array.isArray(dataflows)) dataflows = [];
+  dataflows = dataflows.filter(function(d) { return d && isValidGuid(d.value); });
   const savedModels = localStorage.getItem('refresh-semantic-models');
   if (savedModels) {
     try { semanticModels = JSON.parse(savedModels); } catch(e) { semanticModels = []; }
   }
-  if (semanticModels.length === 0) { addSemanticModel(); }
+  if (!Array.isArray(semanticModels)) semanticModels = [];
+  semanticModels = semanticModels.filter(function(m) { return m && isValidGuid(m.workspaceId) && isValidGuid(m.datasetId); });
+  renderDfList();
+  renderSemanticModelList();
 
   await loadProfiles();
   await loadPartitionRefreshProfiles();
@@ -852,6 +1131,8 @@ async function init() {
   updateTabUI();
 }
 
+let lastAuthMode = '';
+
 async function checkAuth() {
   const badge = document.getElementById('authBadge');
   const banner = document.getElementById('authBanner');
@@ -860,20 +1141,27 @@ async function checkAuth() {
   try {
     const resp = await fetch(API + '/api/auth/status');
     const data = await resp.json();
+    lastAuthMode = data.authMode || '';
     if (data.authenticated) {
-      badge.textContent = 'Auth OK';
+      badge.textContent = data.authMode === 'service-principal' ? 'Signed in (certificate)' : 'Signed in (device code)';
       badge.className = 'status-badge done';
       banner.style.display = 'none';
       document.getElementById('btnStart').disabled = false;
+      // Names for saved profiles and rows that only hold IDs (one request, read-only).
+      scheduleNameLookup();
     } else {
-      badge.textContent = 'Not Auth';
+      badge.textContent = 'Not signed in';
       badge.className = 'status-badge failed';
       if (data.msalAvailable === false) {
         message.textContent = 'Refresh authentication needs MSAL.PS. Rebind is fully available without it.';
         authButton.disabled = true;
         authButton.textContent = 'MSAL.PS not installed';
+      } else if (data.authMode === 'service-principal') {
+        message.textContent = 'This PC signs in with its certificate, and that sign-in failed' + (data.error ? ': ' + data.error : '.') + ' Run setup.bat -CheckOnly for details. Rebind does not need sign-in.';
+        authButton.disabled = false;
+        authButton.textContent = 'Try the certificate again';
       } else {
-        message.textContent = 'Refresh and Partition Refresh require authentication. Rebind does not.';
+        message.textContent = 'Refresh and Partition Refresh need sign-in. This PC uses device code: you sign in with your own account. Rebind does not need sign-in.';
         authButton.disabled = false;
         authButton.textContent = 'Authenticate for Refresh';
       }
@@ -881,7 +1169,7 @@ async function checkAuth() {
       document.getElementById('btnStart').disabled = true;
     }
   } catch(e) {
-    badge.textContent = 'Offline';
+    badge.textContent = 'Server offline';
     badge.className = 'status-badge failed';
   }
 }
@@ -891,7 +1179,9 @@ async function authenticateRefresh() {
   const message = document.getElementById('authMessage');
   button.disabled = true;
   button.textContent = 'Waiting for sign-in...';
-  message.innerHTML = 'Complete the device-code sign-in shown in the <strong>server console</strong>. The dashboard is already open and Rebind remains independent of this login.';
+  message.innerHTML = lastAuthMode === 'service-principal'
+    ? 'Signing in with this PC&#39;s certificate. Rebind does not need sign-in.'
+    : 'Device-code sign-in: open <strong>https://login.microsoft.com/device</strong> and enter the code shown in the <strong>server console</strong>. Rebind does not need sign-in.';
   try {
     const resp = await fetch(API + '/api/auth/login', { method: 'POST' });
     const data = await resp.json();
@@ -909,7 +1199,7 @@ async function authenticateRefresh() {
 // Tab switching
 // ============================================================
 function switchTab(tab) {
-  // Keep polling alive for both tabs — each poller writes to its own log container.
+  // Keep polling alive for both tabs - each poller writes to its own log container.
   // Stopping polling on tab switch was the root cause of the log-freeze bug.
   resetDots();
   resetRebindDots();
@@ -949,7 +1239,7 @@ function updateTabUI() {
   document.getElementById('controlsRebind').style.display = currentTab === 'rebind' ? '' : 'none';
   document.getElementById('partitionRefreshState').style.display = currentTab === 'partition-refresh' ? '' : 'none';
 
-  // Separate log containers — show the active tab's log, hide the other
+  // Separate log containers - show the active tab's log, hide the other
   document.getElementById('logsRefresh').style.display = currentTab === 'refresh' ? '' : 'none';
   document.getElementById('logsPartitionRefresh').style.display = currentTab === 'partition-refresh' ? '' : 'none';
   document.getElementById('rebindOutput').style.display = currentTab === 'rebind' ? '' : 'none';
@@ -968,17 +1258,19 @@ function updateTabUI() {
   } else {
     checkAuth();
   }
-  // on Refresh tab: leave banner alone — checkAuth() owns its visibility
+  // on Refresh tab: leave banner alone - checkAuth() owns its visibility
 
   const header = document.getElementById('mainHeader');
   header.classList.toggle('rebind', currentTab === 'rebind');
+
+  document.body.dataset.tab = currentTab;
 
   if (currentTab === 'refresh') {
     document.getElementById('sidebarSubtitle').textContent = 'Chained dataflow(s) → semantic model(s)';
     document.getElementById('pageTitle').textContent = selectedId || 'Select or create a profile';
     renderDfList();
     renderSemanticModelList();
-  } else {
+  } else if (currentTab === 'rebind') {
     document.getElementById('sidebarSubtitle').textContent = 'GUID replacement in PBIP projects';
     document.getElementById('pageTitle').textContent = 'PBIP Rebind';
     renderRebindProfileList();
@@ -1007,6 +1299,16 @@ async function loadProfiles() {
           p.SemanticModels = p.DatasetId ? [{ WorkspaceId: p.WorkspaceId || '', DatasetId: p.DatasetId }] : [];
         }
       }
+      // Older saves flattened model rows to text such as
+      // "@{WorkspaceId=<guid>; DatasetId=<guid>}". Read them back; saving the profile
+      // stores them as proper rows again.
+      p.SemanticModels = (p.SemanticModels || []).map(function(model) {
+        if (typeof model !== 'string') return model;
+        const match = model.match(/^@\{\s*WorkspaceId=([^;}]*);\s*DatasetId=([^;}]*)\}$/);
+        if (!match) return model;
+        p._repairedRows = true;
+        return { WorkspaceId: match[1].trim(), DatasetId: match[2].trim() };
+      });
       p.NotifyEmails = p.NotifyEmails || '';
       p.EmailDryRun = p.EmailDryRun === true;
     });
@@ -1017,19 +1319,26 @@ async function loadProfiles() {
 function renderProfileList() {
   const list = document.getElementById('profileList');
   if (profiles.length === 0) {
-    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">No saved profiles.<br>Click "+ New" to add one.</div>';
+    list.innerHTML = '<div class="list-empty">No saved profiles yet.<br>Fill in the form and click <strong>Save Profile</strong>, or use <strong>New profile</strong>.</div>';
     return;
   }
-  list.innerHTML = profiles.map((p, index) => `
-    <div class="profile-card${selectedId === p.name ? ' selected' : ''}" onclick="selectProfileByIndex(${index})">
-      <div class="name">${escHtml(p.name)}</div>
-      <div class="ids">
-        <span>WS: ${escHtml(p.WorkspaceId)}</span>
-        <span>DF: ${(p.DataflowIds || []).length} dataflow(s)</span>
-        <span>SM: ${(p.SemanticModels || []).length} model(s)</span>
-      </div>
-    </div>
-  `).join('');
+  list.innerHTML = profiles.map((p, index) => {
+    const dfCount = getProfileDataflows(p).length;
+    const smCount = (p.SemanticModels || []).length;
+    const workspaceName = p.WorkspaceName || catalogNames.workspaces[(p.WorkspaceId || '').toLowerCase()] || '';
+    const workspaceLine = workspaceName
+      ? `<span class="ws-name">${escHtml(workspaceName)}</span>`
+      : `<span class="mono">${escHtml(p.WorkspaceId || 'No workspace')}</span>`;
+    return `
+    <button type="button" class="profile-card${selectedId === p.name ? ' selected' : ''}" onclick="selectProfileByIndex(${index})">
+      <span class="name">${escHtml(p.name)}</span>
+      <span class="ids">
+        <span>${dfCount === 0 ? 'No dataflows' : dfCount + (dfCount === 1 ? ' dataflow' : ' dataflows')}</span>
+        <span>${smCount + (smCount === 1 ? ' semantic model' : ' semantic models')}</span>
+        ${workspaceLine}
+      </span>
+    </button>`;
+  }).join('');
 }
 
 function selectProfileByIndex(index) {
@@ -1037,28 +1346,87 @@ function selectProfileByIndex(index) {
   if (profile) selectProfile(profile.name);
 }
 
+// A profile's dataflows: the Dataflows list (each with its own workspace, written since the
+// name pickers) or, for older profiles, DataflowIds in the profile's WorkspaceId.
+function getProfileDataflows(p) {
+  if (Array.isArray(p.Dataflows) && p.Dataflows.length) {
+    return p.Dataflows.map(function(d) {
+      return { value: d.DataflowId || '', workspaceId: d.WorkspaceId || p.WorkspaceId || '', name: d.Name || '', workspaceName: d.WorkspaceName || '' };
+    });
+  }
+  return (p.DataflowIds || []).map(function(id) { return { value: id, workspaceId: p.WorkspaceId || '', name: '', workspaceName: p.WorkspaceName || '' }; });
+}
+
+// The profile as saved. IDs stay the source of truth; names are kept for display.
+// DataflowIds keeps the dataflows in the profile's workspace for older readers (the
+// Claude skill's profile command); Dataflows holds all of them with their workspaces.
+function buildRefreshProfile(name, emailResult, modelResult) {
+  const ws = document.getElementById('workspaceId').value.trim();
+  const withName = function(entry, nameValue, workspaceName) {
+    if (nameValue) entry.Name = nameValue;
+    if (workspaceName) entry.WorkspaceName = workspaceName;
+    return entry;
+  };
+  return {
+    name: name,
+    WorkspaceId: ws,
+    WorkspaceName: catalogNames.workspaces[ws.toLowerCase()] || '',
+    DataflowIds: getValidDataflows(),
+    Dataflows: dataflows.filter(function(d) { return isValidGuid(d.value) && isValidGuid(d.workspaceId || ws); }).map(function(d) {
+      const workspaceId = d.workspaceId || ws;
+      return withName({ WorkspaceId: workspaceId, DataflowId: d.value },
+        d.name || catalogNames.dataflows[catalogKey(workspaceId, d.value)] || '',
+        d.workspaceName || catalogNames.workspaces[workspaceId.toLowerCase()] || '');
+    }),
+    SemanticModels: modelResult.models.map(function(m) {
+      const row = semanticModels.find(function(r) { return sameGuid(r.workspaceId, m.WorkspaceId) && sameGuid(r.datasetId, m.DatasetId); }) || {};
+      return withName({ WorkspaceId: m.WorkspaceId, DatasetId: m.DatasetId },
+        row.name || catalogNames.models[catalogKey(m.WorkspaceId, m.DatasetId)] || '',
+        row.workspaceName || catalogNames.workspaces[m.WorkspaceId.toLowerCase()] || '');
+    }),
+    NotifyEmails: emailResult.addresses.join(', '),
+    EmailDryRun: document.getElementById('emailDryRun').checked
+  };
+}
+
 function selectProfile(name) {
   selectedId = name;
   const p = profiles.find(x => x.name === name);
   if (!p) return;
   document.getElementById('profileName').value = p.name;
-  document.getElementById('workspaceId').value = p.WorkspaceId;
+  document.getElementById('workspaceId').value = p.WorkspaceId || '';
+  rememberWorkspaceName(p.WorkspaceId, p.WorkspaceName);
   document.getElementById('notifyEmails').value = p.NotifyEmails || '';
   document.getElementById('emailDryRun').checked = p.EmailDryRun === true;
+  // Model only is a one-run choice: never carried over to another profile.
+  document.getElementById('modelOnly').checked = false;
+  updateModelOnlyUI();
   validateNotifyEmails(false);
-  // Populate dataflow list
-  dataflows = (p.DataflowIds || []).map(function(df, i) {
-    return { id: Date.now() + i, value: df };
+  // Rows carry IDs and, when the profile saved them, names. Rows with an incomplete ID
+  // (an older profile can have an empty dataset ID) are kept out of the form.
+  dataflows = getProfileDataflows(p).filter(function(d) { return isValidGuid(d.value); }).map(function(d) {
+    rememberWorkspaceName(d.workspaceId, d.workspaceName);
+    return { id: newRowId(), value: d.value, workspaceId: d.workspaceId, name: d.name, workspaceName: d.workspaceName };
   });
-  if (dataflows.length === 0) { addDataflow(); }
-  semanticModels = (p.SemanticModels || []).map(function(model, i) {
-    return { id: Date.now() + 1000 + i, workspaceId: model.WorkspaceId || p.WorkspaceId || '', datasetId: model.DatasetId || '' };
-  });
-  if (semanticModels.length === 0) { addSemanticModel(); }
+  const savedModels = p.SemanticModels || [];
+  semanticModels = savedModels.map(function(model) {
+    rememberWorkspaceName(model.WorkspaceId, model.WorkspaceName);
+    return { id: newRowId(), workspaceId: model.WorkspaceId || p.WorkspaceId || '', datasetId: model.DatasetId || '', name: model.Name || '', workspaceName: model.WorkspaceName || '' };
+  }).filter(function(m) { return isValidGuid(m.workspaceId) && isValidGuid(m.datasetId); });
+  const skippedModels = savedModels.length - semanticModels.length;
   persistDataflows();
   persistSemanticModels();
   renderDfList();
   renderSemanticModelList();
+  showSelectedWorkspace();
+  if (skippedModels > 0) {
+    setPickerNote('refreshPickerNote', 'This profile has ' + skippedModels + (skippedModels === 1 ? ' semantic model row' : ' semantic model rows') + ' without a complete ID. ' + (skippedModels === 1 ? 'It was' : 'They were') + ' left out; add the model again by name and save.', 'warn');
+  } else if (p._repairedRows) {
+    setPickerNote('refreshPickerNote', 'This profile stored its semantic models in an old damaged format. They were read back; click Save Profile once to store them properly.', 'warn');
+  } else {
+    setPickerNote('refreshPickerNote', '');
+  }
+  scheduleNameLookup();
   document.getElementById('pageTitle').textContent = p.name;
   document.getElementById('btnDelete').disabled = false;
   localStorage.setItem('refresh-dashboard-selected', name);
@@ -1079,6 +1447,23 @@ function closeModal(id) {
   document.getElementById(id).classList.remove('open');
 }
 
+// Escape or a click on the dimmed backdrop closes the open dialog; Enter in the
+// new-profile name field creates the profile.
+function initializeModals() {
+  document.addEventListener('keydown', function(event) {
+    if (event.key !== 'Escape') return;
+    document.querySelectorAll('.modal-overlay.open').forEach(function(overlay) { closeModal(overlay.id); });
+  });
+  document.querySelectorAll('.modal-overlay').forEach(function(overlay) {
+    overlay.addEventListener('mousedown', function(event) {
+      if (event.target === overlay) closeModal(overlay.id);
+    });
+  });
+  document.getElementById('modalName').addEventListener('keydown', function(event) {
+    if (event.key === 'Enter') createProfile();
+  });
+}
+
 function openVersion() {
   document.getElementById('modalVersion').classList.add('open');
 }
@@ -1095,14 +1480,7 @@ async function createProfile() {
   if (!emailResult.valid) return;
   const modelResult = getSemanticModelValidation();
   if (!modelResult.valid) return alert('Every semantic model row must contain valid workspace and dataset GUIDs.');
-  profiles.push({
-    name: name,
-    WorkspaceId: document.getElementById('workspaceId').value.trim() || '',
-    DataflowIds: getValidDataflows(),
-    SemanticModels: modelResult.models,
-    NotifyEmails: emailResult.addresses.join(', '),
-    EmailDryRun: document.getElementById('emailDryRun').checked
-  });
+  profiles.push(buildRefreshProfile(name, emailResult, modelResult));
   if (!(await saveProfilesToDisk())) return;
   selectProfile(name);
   closeModal('modalNew');
@@ -1115,14 +1493,10 @@ async function saveProfile() {
   if (!emailResult.valid) return;
   const modelResult = getSemanticModelValidation();
   if (!modelResult.valid) return alert('Every semantic model row must contain valid workspace and dataset GUIDs.');
-  const p = {
-    name: name,
-    WorkspaceId: document.getElementById('workspaceId').value.trim(),
-    DataflowIds: getValidDataflows(),
-    SemanticModels: modelResult.models,
-    NotifyEmails: emailResult.addresses.join(', '),
-    EmailDryRun: document.getElementById('emailDryRun').checked
-  };
+  if (dataflows.some(function(d) { return !isValidGuid(d.workspaceId); }) && !isValidGuid(document.getElementById('workspaceId').value.trim())) {
+    return alert('Choose the workspace of the dataflows before saving.');
+  }
+  const p = buildRefreshProfile(name, emailResult, modelResult);
   const idx = profiles.findIndex(x => x.name === name);
   if (idx >= 0) profiles[idx] = p; else profiles.push(p);
   if (!(await saveProfilesToDisk())) return;
@@ -1138,9 +1512,13 @@ async function deleteProfile() {
   document.getElementById('workspaceId').value = '';
   document.getElementById('notifyEmails').value = '';
   document.getElementById('emailDryRun').checked = false;
+  document.getElementById('modelOnly').checked = false;
+  updateModelOnlyUI();
   validateNotifyEmails(false);
-  dataflows = []; addDataflow(); persistDataflows(); renderDfList();
-  semanticModels = []; addSemanticModel(); persistSemanticModels(); renderSemanticModelList();
+  dataflows = []; persistDataflows(); renderDfList();
+  semanticModels = []; persistSemanticModels(); renderSemanticModelList();
+  setPickerText('ws', '');
+  setPickerNote('refreshPickerNote', '');
   document.getElementById('pageTitle').textContent = 'Select or create a profile';
   document.getElementById('btnDelete').disabled = true;
   await saveProfilesToDisk();
@@ -1162,39 +1540,72 @@ async function saveProfilesToDisk() {
 // ============================================================
 // Dataflow list management
 // ============================================================
-function addDataflow() {
-  const id = Date.now();
-  dataflows.push({ id: id, value: '' });
+// Each dataflow row is {id, value (dataflow GUID), workspaceId, name, workspaceName}. A
+// row keeps its own workspace, so one profile can hold dataflows from several workspaces.
+// Row IDs only need to be unique in this page; rows restored from the browser keep theirs.
+let nextRowId = 0;
+function newRowId() {
+  dataflows.concat(semanticModels).forEach(function(row) { if (row && row.id > nextRowId) nextRowId = row.id; });
+  nextRowId += 1;
+  return nextRowId;
+}
+
+function sameGuid(a, b) { return (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase(); }
+
+function addDataflowRow(entry) {
+  const value = (entry.value || '').trim();
+  const workspaceId = (entry.workspaceId || '').trim();
+  if (!isValidGuid(value) || !isValidGuid(workspaceId)) return false;
+  if (dataflows.some(function(d) { return sameGuid(d.value, value) && sameGuid(d.workspaceId, workspaceId); })) return false;
+  dataflows.push({ id: newRowId(), value: value, workspaceId: workspaceId, name: entry.name || '', workspaceName: entry.workspaceName || '' });
   persistDataflows();
   renderDfList();
+  return true;
 }
 
 function removeDataflow(id) {
-  if (dataflows.length <= 1) return;
   dataflows = dataflows.filter(function(d) { return d.id !== id; });
   persistDataflows();
   renderDfList();
 }
 
-function updateDfGuid(id, value) {
-  const d = dataflows.find(function(x) { return x.id === id; });
-  if (d) { d.value = value; persistDataflows(); }
+function itemRowHtml(name, sub, idText, removeCall, removeLabel) {
+  const known = !!name;
+  return '<div class="item-row" title="' + escHtml(idText) + '">' +
+    '<span class="item-text"><span class="item-name' + (known ? '' : ' mono') + '">' + escHtml(known ? name : idText.split(' ').pop()) + '</span>' +
+    '<span class="item-sub' + (sub ? '' : ' muted') + '">' + escHtml(sub || (catalogLookupFailed ? 'Name unavailable' : 'Looking up the name...')) + '</span></span>' +
+    '<button class="btn-row-remove" onclick="' + removeCall + '" title="' + removeLabel + '" aria-label="' + removeLabel + '">&#x2715;</button>' +
+    '</div>';
 }
 
 function renderDfList() {
   const container = document.getElementById('dfList');
-  container.innerHTML = dataflows.map(function(d, i) {
-    return '<div class="df-row">' +
-      '<input type="text" id="df_' + d.id + '" value="' + escHtml(d.value || '') + '" placeholder="Dataflow GUID (' + (i + 1) + ')" oninput="updateDfGuid(' + d.id + ',this.value)">' +
-      (dataflows.length > 1 ? '<button class="btn-row-remove" onclick="removeDataflow(' + d.id + ')" title="Remove">&#x2715;</button>' : '') +
-      '</div>';
+  if (dataflows.length === 0) {
+    container.innerHTML = '<div class="list-empty-inline">No dataflows. Picking a semantic model adds the dataflows it reads from, or add one below.</div>';
+    return;
+  }
+  container.innerHTML = dataflows.map(function(d) {
+    const name = d.name || catalogNames.dataflows[catalogKey(d.workspaceId, d.value)] || '';
+    const workspaceName = d.workspaceName || catalogNames.workspaces[(d.workspaceId || '').toLowerCase()] || '';
+    const sub = !isValidGuid(d.workspaceId) ? 'Workspace unknown: choose the workspace above' : (name ? workspaceName : '');
+    return itemRowHtml(name, sub, 'Dataflow ID ' + d.value, 'removeDataflow(' + d.id + ')', 'Remove this dataflow');
   }).join('');
 }
 
+// Dataflows in the profile's workspace travel as DataflowIds (the original form); the
+// others travel with their own workspace in getOtherWorkspaceDataflows().
 function getValidDataflows() {
+  const ws = document.getElementById('workspaceId').value.trim();
   return dataflows.filter(function(d) {
-    return d.value && isValidGuid(d.value);
+    return d.value && isValidGuid(d.value) && (!d.workspaceId || sameGuid(d.workspaceId, ws));
   }).map(function(d) { return d.value; });
+}
+
+function getOtherWorkspaceDataflows() {
+  const ws = document.getElementById('workspaceId').value.trim();
+  return dataflows.filter(function(d) {
+    return d.value && isValidGuid(d.value) && d.workspaceId && isValidGuid(d.workspaceId) && !sameGuid(d.workspaceId, ws);
+  }).map(function(d) { return { WorkspaceId: d.workspaceId, DataflowId: d.value }; });
 }
 
 function persistDataflows() {
@@ -1204,34 +1615,473 @@ function persistDataflows() {
 // ============================================================
 // Semantic model list and notification recipients
 // ============================================================
-function addSemanticModel() {
-  const workspaceInput = document.getElementById('workspaceId');
-  semanticModels.push({ id: Date.now() + Math.floor(Math.random() * 1000), workspaceId: workspaceInput ? workspaceInput.value.trim() : '', datasetId: '' });
+// Each model row is {id, workspaceId, datasetId, name, workspaceName}.
+function addModelRow(entry) {
+  const workspaceId = (entry.workspaceId || '').trim();
+  const datasetId = (entry.datasetId || '').trim();
+  if (!isValidGuid(workspaceId) || !isValidGuid(datasetId)) return null;
+  const existing = semanticModels.find(function(m) { return sameGuid(m.workspaceId, workspaceId) && sameGuid(m.datasetId, datasetId); });
+  if (existing) return existing;
+  const row = { id: newRowId(), workspaceId: workspaceId, datasetId: datasetId, name: entry.name || '', workspaceName: entry.workspaceName || '' };
+  semanticModels.push(row);
   persistSemanticModels();
   renderSemanticModelList();
+  return row;
 }
 
 function removeSemanticModel(id) {
-  if (semanticModels.length <= 1) return;
   semanticModels = semanticModels.filter(function(model) { return model.id !== id; });
   persistSemanticModels();
   renderSemanticModelList();
 }
 
-function updateSemanticModel(id, field, value) {
-  const model = semanticModels.find(function(item) { return item.id === id; });
-  if (model) { model[field] = value; persistSemanticModels(); }
-}
-
 function renderSemanticModelList() {
   const container = document.getElementById('semanticModelList');
-  container.innerHTML = semanticModels.map(function(model, index) {
-    return '<div class="semantic-row">' +
-      '<input type="text" value="' + escHtml(model.workspaceId || '') + '" placeholder="Workspace GUID (' + (index + 1) + ')" oninput="updateSemanticModel(' + model.id + ',\'workspaceId\',this.value)">' +
-      '<input type="text" value="' + escHtml(model.datasetId || '') + '" placeholder="Semantic model / Dataset GUID" oninput="updateSemanticModel(' + model.id + ',\'datasetId\',this.value)">' +
-      (semanticModels.length > 1 ? '<button class="btn-row-remove" onclick="removeSemanticModel(' + model.id + ')" title="Remove">&#x2715;</button>' : '<span></span>') +
-      '</div>';
+  if (semanticModels.length === 0) {
+    container.innerHTML = '<div class="list-empty-inline">No semantic models yet. Add a report or a semantic model below.</div>';
+    return;
+  }
+  container.innerHTML = semanticModels.map(function(model) {
+    const name = model.name || catalogNames.models[catalogKey(model.workspaceId, model.datasetId)] || '';
+    const workspaceName = model.workspaceName || catalogNames.workspaces[(model.workspaceId || '').toLowerCase()] || '';
+    return itemRowHtml(name, name ? workspaceName : '', 'Dataset ID ' + model.datasetId, 'removeSemanticModel(' + model.id + ')', 'Remove this semantic model');
   }).join('');
+}
+
+// ============================================================
+// Name pickers: search Power BI by name, keep IDs underneath
+// ============================================================
+// The server's read-only /api/catalog/* endpoints list workspaces, the reports, semantic
+// models and dataflows in a workspace, and a model's upstream dataflows (lineage).
+// Nothing here changes anything in Power BI.
+let catalogWorkspaces = null;
+let catalogWorkspacesPromise = null;
+const catalogItemsCache = {};
+const catalogNames = { workspaces: {}, dataflows: {}, models: {} };
+let catalogLookupFailed = false;
+let catalogNameLookupTimer = null;
+const PICKER_LIMIT = 200;
+const pickerStates = {};
+const pickerSelectedText = { ws: '', pws: '', pmodel: '' };
+
+function catalogKey(workspaceId, id) { return ((workspaceId || '') + '|' + (id || '')).toLowerCase(); }
+
+async function catalogRequest(path, options) {
+  const resp = await fetch(API + path, options);
+  let data = null;
+  try { data = await resp.json(); } catch (e) { data = null; }
+  if (resp.status === 401) throw new Error('Sign in first to search by name. The IDs section below works without it.');
+  if (!resp.ok || !data || !data.ok) throw new Error((data && data.error) || ('The lookup failed (HTTP ' + resp.status + ').'));
+  return data;
+}
+
+function rememberWorkspaceName(id, name) {
+  if (id && name) catalogNames.workspaces[id.toLowerCase()] = name;
+}
+
+async function loadCatalogWorkspaces() {
+  if (catalogWorkspaces) return catalogWorkspaces;
+  if (!catalogWorkspacesPromise) {
+    catalogWorkspacesPromise = catalogRequest('/api/catalog/workspaces').then(function(data) {
+      catalogWorkspaces = data.workspaces || [];
+      catalogWorkspaces.forEach(function(w) { rememberWorkspaceName(w.id, w.name); });
+      return catalogWorkspaces;
+    }).finally(function() { catalogWorkspacesPromise = null; });
+  }
+  return catalogWorkspacesPromise;
+}
+
+async function loadCatalogItems(workspaceId) {
+  const key = (workspaceId || '').toLowerCase();
+  if (!isValidGuid(key)) throw new Error('Choose a workspace first.');
+  if (!catalogItemsCache[key]) {
+    catalogItemsCache[key] = catalogRequest('/api/catalog/items?workspaceId=' + encodeURIComponent(key)).then(function(data) {
+      (data.dataflows || []).forEach(function(d) { catalogNames.dataflows[catalogKey(key, d.id)] = d.name; });
+      (data.semanticModels || []).forEach(function(m) { catalogNames.models[catalogKey(key, m.id)] = m.name; });
+      return data;
+    }).catch(function(error) { delete catalogItemsCache[key]; throw error; });
+  }
+  return catalogItemsCache[key];
+}
+
+// Names for IDs that have none yet (profiles saved before the pickers, IDs pasted by
+// hand, the sidebar). One request for everything; the profile file is not changed.
+function scheduleNameLookup() {
+  if (catalogNameLookupTimer) clearTimeout(catalogNameLookupTimer);
+  catalogNameLookupTimer = setTimeout(lookupMissingNames, 60);
+}
+
+async function lookupMissingNames() {
+  catalogNameLookupTimer = null;
+  const workspaceIds = {};
+  const dataflowEntries = {};
+  const modelEntries = {};
+  const wantWorkspace = function(id) { if (isValidGuid(id) && !catalogNames.workspaces[id.toLowerCase()]) workspaceIds[id.toLowerCase()] = true; };
+  profiles.forEach(function(p) {
+    if (!p.WorkspaceName) wantWorkspace(p.WorkspaceId);
+    (p.SemanticModels || []).forEach(function(m) { if (!m.WorkspaceName) wantWorkspace(m.WorkspaceId); });
+  });
+  dataflows.forEach(function(d) {
+    wantWorkspace(d.workspaceId);
+    if (!d.name && isValidGuid(d.value) && !catalogNames.dataflows[catalogKey(d.workspaceId, d.value)]) dataflowEntries[catalogKey(d.workspaceId, d.value)] = { workspaceId: d.workspaceId, id: d.value };
+  });
+  semanticModels.forEach(function(m) {
+    wantWorkspace(m.workspaceId);
+    if (!m.name && isValidGuid(m.datasetId) && !catalogNames.models[catalogKey(m.workspaceId, m.datasetId)]) modelEntries[catalogKey(m.workspaceId, m.datasetId)] = { workspaceId: m.workspaceId, id: m.datasetId };
+  });
+  partitionRefreshProfiles.forEach(function(p) {
+    if (!p.WorkspaceName) wantWorkspace(p.WorkspaceId);
+    if (!p.DatasetName && isValidGuid(p.WorkspaceId) && isValidGuid(p.DatasetId) && !catalogNames.models[catalogKey(p.WorkspaceId, p.DatasetId)]) modelEntries[catalogKey(p.WorkspaceId, p.DatasetId)] = { workspaceId: p.WorkspaceId, id: p.DatasetId };
+  });
+  wantWorkspace(document.getElementById('workspaceId').value.trim());
+  const body = { workspaceIds: Object.keys(workspaceIds), dataflows: Object.values(dataflowEntries), semanticModels: Object.values(modelEntries) };
+  if (body.workspaceIds.length + body.dataflows.length + body.semanticModels.length === 0) return;
+  try {
+    const data = await catalogRequest('/api/catalog/names', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    (data.workspaces || []).forEach(function(w) { rememberWorkspaceName(w.id, w.name); });
+    (data.dataflows || []).forEach(function(d) { catalogNames.dataflows[catalogKey(d.workspaceId, d.id)] = d.name; rememberWorkspaceName(d.workspaceId, d.workspaceName); });
+    (data.semanticModels || []).forEach(function(m) { catalogNames.models[catalogKey(m.workspaceId, m.id)] = m.name; rememberWorkspaceName(m.workspaceId, m.workspaceName); });
+    catalogLookupFailed = false;
+  } catch (e) {
+    catalogLookupFailed = true;
+  }
+  renderDfList();
+  renderSemanticModelList();
+  renderProfileList();
+  renderPartitionRefreshProfileList();
+  showSelectedWorkspace();
+}
+
+// --- the picker component --------------------------------------------------------------
+// Each picker is an input (role combobox) and a list (role listbox). Its items come from
+// a source function; choosing one calls its pick function. Typing filters by every word.
+const PICKERS = {
+  ws:     { input: 'wsPickerInput',     list: 'wsPickerList',     source: workspacePickerItems,       pick: pickWorkspace,          keepText: true },
+  model:  { input: 'modelPickerInput',  list: 'modelPickerList',  source: modelPickerItems,           pick: pickModel,              keepText: false },
+  df:     { input: 'dfPickerInput',     list: 'dfPickerList',     source: dataflowPickerItems,        pick: pickDataflow,           keepText: false },
+  pws:    { input: 'pwsPickerInput',    list: 'pwsPickerList',    source: workspacePickerItems,       pick: pickPartitionWorkspace, keepText: true },
+  pmodel: { input: 'pmodelPickerInput', list: 'pmodelPickerList', source: partitionModelPickerItems,  pick: pickPartitionModel,     keepText: true }
+};
+
+function pickerState(key) {
+  if (!pickerStates[key]) pickerStates[key] = { items: [], shown: [], active: -1, loading: false, message: '', blurTimer: null };
+  return pickerStates[key];
+}
+
+async function pickerOpen(key) {
+  const config = PICKERS[key];
+  const state = pickerState(key);
+  const input = document.getElementById(config.input);
+  if (state.blurTimer) { clearTimeout(state.blurTimer); state.blurTimer = null; }
+  if (config.keepText && input.value && input.value === pickerSelectedText[key]) input.select();
+  state.stale = false;
+  state.loading = true;
+  state.message = '';
+  renderPickerList(key);
+  try {
+    state.items = await config.source();
+  } catch (e) {
+    state.items = [];
+    state.message = e.message;
+  }
+  state.loading = false;
+  if (document.activeElement === input) pickerFilter(key);
+}
+
+function pickerFilter(key) {
+  const config = PICKERS[key];
+  const state = pickerState(key);
+  const input = document.getElementById(config.input);
+  if (state.stale) { state.stale = false; pickerOpen(key); return; }
+  let query = input.value.trim().toLowerCase();
+  if (config.keepText && input.value === pickerSelectedText[key]) query = '';
+  const words = query.split(/\s+/).filter(Boolean);
+  state.shown = state.items.filter(function(item) {
+    const text = (item.label + ' ' + (item.sub || '') + ' ' + (item.group || '')).toLowerCase();
+    return words.every(function(word) { return text.indexOf(word) >= 0; });
+  });
+  state.total = state.shown.length;
+  state.shown = state.shown.slice(0, PICKER_LIMIT);
+  state.active = state.shown.findIndex(function(item) { return !item.disabled; });
+  renderPickerList(key);
+}
+
+function renderPickerList(key) {
+  const config = PICKERS[key];
+  const state = pickerState(key);
+  const input = document.getElementById(config.input);
+  const list = document.getElementById(config.list);
+  let html = '';
+  if (state.loading) {
+    html = '<li class="picker-message">Loading from Power BI...</li>';
+  } else if (state.message) {
+    html = '<li class="picker-message">' + escHtml(state.message) + '</li>';
+  } else if (state.shown.length === 0) {
+    html = '<li class="picker-message">' + (state.items.length ? 'Nothing matches. Try another word.' : 'Nothing to choose here.') + '</li>';
+  } else {
+    let group = null;
+    state.shown.forEach(function(item, index) {
+      if (item.group && item.group !== group) {
+        group = item.group;
+        html += '<li class="picker-group" role="presentation">' + escHtml(group) + '</li>';
+      }
+      html += '<li class="picker-option' + (index === state.active ? ' active' : '') + (item.disabled ? ' disabled' : '') + '" role="option" id="' + config.list + '_' + index + '"' +
+        ' aria-selected="' + (index === state.active) + '"' + (item.disabled ? ' aria-disabled="true"' : '') +
+        ' onmousedown="event.preventDefault(); pickerChoose(\'' + key + '\',' + index + ')">' +
+        '<span class="opt-label">' + escHtml(item.label) + '</span>' +
+        (item.sub ? '<span class="opt-sub">' + escHtml(item.sub) + '</span>' : '') + '</li>';
+    });
+    if (state.total > state.shown.length) html += '<li class="picker-more" role="presentation">Showing ' + state.shown.length + ' of ' + state.total + '. Type to narrow the list.</li>';
+  }
+  list.innerHTML = html;
+  list.hidden = false;
+  input.setAttribute('aria-expanded', 'true');
+  if (state.active >= 0) input.setAttribute('aria-activedescendant', config.list + '_' + state.active); else input.removeAttribute('aria-activedescendant');
+}
+
+function pickerMove(key, step) {
+  const state = pickerState(key);
+  if (!state.shown.length) return;
+  let index = state.active;
+  for (let i = 0; i < state.shown.length; i++) {
+    index = (index + step + state.shown.length) % state.shown.length;
+    if (!state.shown[index].disabled) break;
+  }
+  state.active = index;
+  renderPickerList(key);
+  const option = document.getElementById(PICKERS[key].list + '_' + index);
+  if (option && option.scrollIntoView) option.scrollIntoView({ block: 'nearest' });
+}
+
+function pickerKey(event, key) {
+  const list = document.getElementById(PICKERS[key].list);
+  if (event.key === 'ArrowDown') { event.preventDefault(); if (list.hidden) pickerOpen(key); else pickerMove(key, 1); }
+  else if (event.key === 'ArrowUp') { event.preventDefault(); if (!list.hidden) pickerMove(key, -1); }
+  else if (event.key === 'Enter') { event.preventDefault(); if (!list.hidden) pickerChoose(key, pickerState(key).active); }
+  else if (event.key === 'Escape') { if (!list.hidden) { event.preventDefault(); event.stopPropagation(); pickerClose(key, true); } }
+}
+
+function pickerBlur(key) {
+  const state = pickerState(key);
+  state.blurTimer = setTimeout(function() { pickerClose(key, true); }, 120);
+}
+
+function pickerClose(key, restoreText) {
+  const config = PICKERS[key];
+  const input = document.getElementById(config.input);
+  const list = document.getElementById(config.list);
+  list.hidden = true;
+  input.setAttribute('aria-expanded', 'false');
+  input.removeAttribute('aria-activedescendant');
+  if (restoreText) input.value = config.keepText ? (pickerSelectedText[key] || '') : '';
+}
+
+function pickerChoose(key, index) {
+  const state = pickerState(key);
+  const item = state.shown[index];
+  if (!item || item.disabled) return;
+  pickerClose(key, false);
+  if (!PICKERS[key].keepText) document.getElementById(PICKERS[key].input).value = '';
+  state.stale = true;
+  PICKERS[key].pick(item.value);
+}
+
+function setPickerText(key, text) {
+  pickerSelectedText[key] = text || '';
+  const input = document.getElementById(PICKERS[key].input);
+  input.value = text || '';
+  if (input.classList) input.classList.toggle('has-value', !!text);
+}
+
+function setPickerNote(id, text, tone) {
+  const note = document.getElementById(id);
+  note.textContent = text || '';
+  note.className = 'picker-note' + (tone ? ' ' + tone : '');
+}
+
+// --- sources -----------------------------------------------------------------------------
+async function workspacePickerItems() {
+  const workspaces = await loadCatalogWorkspaces();
+  return workspaces.map(function(w) { return { label: w.name, value: w }; });
+}
+
+async function modelPickerItems() {
+  const ws = document.getElementById('workspaceId').value.trim();
+  if (!isValidGuid(ws)) throw new Error('Choose a workspace first.');
+  const data = await loadCatalogItems(ws);
+  const added = function(workspaceId, datasetId) { return semanticModels.some(function(m) { return sameGuid(m.workspaceId, workspaceId) && sameGuid(m.datasetId, datasetId); }); };
+  const reports = (data.reports || []).filter(function(r) { return isValidGuid(r.datasetId); }).map(function(r) {
+    const modelName = catalogNames.models[catalogKey(r.datasetWorkspaceId, r.datasetId)];
+    const isAdded = added(r.datasetWorkspaceId, r.datasetId);
+    return { group: 'Reports', label: r.name, sub: isAdded ? 'Its semantic model is already added' : (modelName && modelName !== r.name ? 'Semantic model: ' + modelName : 'Report'), disabled: isAdded, value: { kind: 'report', workspaceId: r.datasetWorkspaceId, datasetId: r.datasetId, label: r.name } };
+  });
+  const models = (data.semanticModels || []).map(function(m) {
+    const isAdded = added(ws, m.id);
+    return { group: 'Semantic models', label: m.name, sub: isAdded ? 'Already added' : (m.isRefreshable ? 'Semantic model' : 'Cannot be refreshed: DirectQuery or live connection'), disabled: isAdded || !m.isRefreshable, value: { kind: 'model', workspaceId: ws, datasetId: m.id, label: m.name } };
+  });
+  return reports.concat(models);
+}
+
+async function dataflowPickerItems() {
+  const ws = document.getElementById('workspaceId').value.trim();
+  if (!isValidGuid(ws)) throw new Error('Choose a workspace first.');
+  const data = await loadCatalogItems(ws);
+  const wsName = catalogNames.workspaces[ws.toLowerCase()] || '';
+  return (data.dataflows || []).map(function(d) {
+    const isAdded = dataflows.some(function(row) { return sameGuid(row.value, d.id) && sameGuid(row.workspaceId, ws); });
+    return { label: d.name, sub: isAdded ? 'Already added' : '', disabled: isAdded, value: { id: d.id, name: d.name, workspaceId: ws, workspaceName: wsName } };
+  });
+}
+
+async function partitionModelPickerItems() {
+  const ws = document.getElementById('partitionWorkspaceId').value.trim();
+  if (!isValidGuid(ws)) throw new Error('Choose a workspace first.');
+  const data = await loadCatalogItems(ws);
+  return (data.semanticModels || []).map(function(m) {
+    return { label: m.name, sub: m.isRefreshable ? '' : 'Cannot be refreshed: DirectQuery or live connection', disabled: !m.isRefreshable, value: { id: m.id, name: m.name, workspaceId: ws } };
+  });
+}
+
+// --- picks -------------------------------------------------------------------------------
+function showSelectedWorkspace() {
+  const ws = document.getElementById('workspaceId').value.trim();
+  const name = isValidGuid(ws) ? (catalogNames.workspaces[ws.toLowerCase()] || ws) : '';
+  if (document.activeElement !== document.getElementById('wsPickerInput')) setPickerText('ws', name);
+  else pickerSelectedText.ws = name;
+}
+
+function pickWorkspace(workspace) {
+  document.getElementById('workspaceId').value = workspace.id;
+  rememberWorkspaceName(workspace.id, workspace.name);
+  setPickerText('ws', workspace.name);
+  setPickerNote('refreshPickerNote', '');
+  // Dataflows of an older profile without a workspace belong to the profile's workspace.
+  let adopted = false;
+  dataflows.forEach(function(d) { if (!isValidGuid(d.workspaceId)) { d.workspaceId = workspace.id; adopted = true; } });
+  if (adopted) { persistDataflows(); scheduleNameLookup(); }
+  loadCatalogItems(workspace.id).catch(function() { });
+  renderDfList();
+}
+
+function onWorkspaceIdTyped() {
+  const ws = document.getElementById('workspaceId').value.trim();
+  if (!isValidGuid(ws)) { setPickerText('ws', ''); return; }
+  showSelectedWorkspace();
+  scheduleNameLookup();
+}
+
+async function pickModel(choice) {
+  const row = addModelRow({ workspaceId: choice.workspaceId, datasetId: choice.datasetId, name: choice.kind === 'model' ? choice.label : '' });
+  if (!row) return;
+  await detectDataflows(row, choice.label);
+}
+
+// Adds the dataflows a semantic model reads from (lineage). A model that cannot be
+// refreshed is taken out again, with the reason.
+async function detectDataflows(row, label) {
+  setPickerNote('refreshPickerNote', 'Finding the dataflows of ' + label + '...', '');
+  try {
+    const data = await catalogRequest('/api/catalog/upstream?workspaceId=' + encodeURIComponent(row.workspaceId) + '&datasetId=' + encodeURIComponent(row.datasetId));
+    row.name = data.model.name;
+    row.workspaceName = data.model.workspaceName;
+    rememberWorkspaceName(row.workspaceId, row.workspaceName);
+    if (data.model.isRefreshable === false) {
+      removeSemanticModel(row.id);
+      setPickerNote('refreshPickerNote', data.model.name + ' cannot be refreshed (DirectQuery or live connection), so it was not added.', 'error');
+      return;
+    }
+    let added = 0;
+    (data.dataflows || []).forEach(function(d) {
+      if (addDataflowRow({ value: d.id, workspaceId: d.workspaceId, name: d.name, workspaceName: d.workspaceName })) added++;
+    });
+    persistSemanticModels();
+    renderSemanticModelList();
+    const found = (data.dataflows || []).length;
+    let text;
+    if ((data.warnings || []).length) text = data.warnings.join(' ');
+    else if (found === 0) text = 'Added ' + data.model.name + '. It reads from no dataflow, so only the model will be refreshed.';
+    else if (added === found) text = 'Added ' + data.model.name + ' and the ' + found + (found === 1 ? ' dataflow' : ' dataflows') + ' it reads from.';
+    else text = 'Added ' + data.model.name + '. It reads from ' + found + (found === 1 ? ' dataflow' : ' dataflows') + '; ' + (found - added) + ' ' + (found - added === 1 ? 'was' : 'were') + ' already in the list.';
+    setPickerNote('refreshPickerNote', text, (data.warnings || []).length ? 'warn' : '');
+  } catch (e) {
+    setPickerNote('refreshPickerNote', 'Added the semantic model, but its dataflows could not be found: ' + e.message + ' Add them below if it needs any.', 'warn');
+    scheduleNameLookup();
+  }
+}
+
+function pickDataflow(choice) {
+  addDataflowRow({ value: choice.id, workspaceId: choice.workspaceId, name: choice.name, workspaceName: choice.workspaceName });
+}
+
+function addDataflowById() {
+  const ws = document.getElementById('workspaceId').value.trim();
+  const input = document.getElementById('manualDataflowId');
+  const value = input.value.trim();
+  const error = document.getElementById('manualAddError');
+  if (!isValidGuid(ws)) { error.textContent = 'Enter a valid workspace ID first.'; return; }
+  if (!isValidGuid(value)) { error.textContent = 'The dataflow ID must be a valid GUID.'; return; }
+  error.textContent = '';
+  addDataflowRow({ value: value, workspaceId: ws });
+  input.value = '';
+  scheduleNameLookup();
+}
+
+function addModelById() {
+  const workspaceInput = document.getElementById('manualModelWorkspaceId');
+  const datasetInput = document.getElementById('manualModelDatasetId');
+  const error = document.getElementById('manualAddError');
+  if (!isValidGuid(workspaceInput.value.trim()) || !isValidGuid(datasetInput.value.trim())) { error.textContent = 'Both the workspace and the dataset ID must be valid GUIDs.'; return; }
+  error.textContent = '';
+  addModelRow({ workspaceId: workspaceInput.value, datasetId: datasetInput.value });
+  workspaceInput.value = '';
+  datasetInput.value = '';
+  scheduleNameLookup();
+}
+
+function pickPartitionWorkspace(workspace) {
+  const input = document.getElementById('partitionWorkspaceId');
+  if (!sameGuid(input.value, workspace.id)) {
+    document.getElementById('partitionDatasetId').value = '';
+    setPickerText('pmodel', '');
+  }
+  input.value = workspace.id;
+  rememberWorkspaceName(workspace.id, workspace.name);
+  setPickerText('pws', workspace.name);
+  setPickerNote('partitionPickerNote', '');
+  loadCatalogItems(workspace.id).catch(function() { });
+}
+
+function pickPartitionModel(model) {
+  document.getElementById('partitionDatasetId').value = model.id;
+  catalogNames.models[catalogKey(model.workspaceId, model.id)] = model.name;
+  setPickerText('pmodel', model.name);
+  setPickerNote('partitionPickerNote', '');
+}
+
+// Shows the names of the partition form's IDs, looking them up when they are unknown.
+async function showPartitionNames() {
+  const ws = document.getElementById('partitionWorkspaceId').value.trim();
+  const ds = document.getElementById('partitionDatasetId').value.trim();
+  const wsName = isValidGuid(ws) ? catalogNames.workspaces[ws.toLowerCase()] : '';
+  const dsName = isValidGuid(ws) && isValidGuid(ds) ? catalogNames.models[catalogKey(ws, ds)] : '';
+  setPickerText('pws', wsName || (isValidGuid(ws) ? ws : ''));
+  setPickerText('pmodel', dsName || (isValidGuid(ds) ? ds : ''));
+  if ((isValidGuid(ws) && !wsName) || (isValidGuid(ds) && !dsName)) {
+    try {
+      const data = await catalogRequest('/api/catalog/names', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspaceIds: isValidGuid(ws) ? [ws] : [], dataflows: [], semanticModels: isValidGuid(ds) ? [{ workspaceId: ws, id: ds }] : [] }) });
+      (data.workspaces || []).forEach(function(w) { rememberWorkspaceName(w.id, w.name); });
+      (data.semanticModels || []).forEach(function(m) { catalogNames.models[catalogKey(m.workspaceId, m.id)] = m.name; });
+      if (sameGuid(document.getElementById('partitionWorkspaceId').value, ws) && sameGuid(document.getElementById('partitionDatasetId').value, ds)) {
+        setPickerText('pws', catalogNames.workspaces[ws.toLowerCase()] || ws);
+        if (isValidGuid(ds)) setPickerText('pmodel', catalogNames.models[catalogKey(ws, ds)] || ds);
+      }
+    } catch (e) { }
+  }
+}
+
+function onPartitionIdsTyped() {
+  showPartitionNames();
 }
 
 function getSemanticModelValidation() {
@@ -1281,9 +2131,9 @@ function renderSemanticModelStatus(details) {
     let cls = '';
     if (detail.status === 'Running') cls = 'active';
     else if (detail.status === 'Succeeded') cls = 'done';
-    else if (detail.status === 'Failed') cls = 'failed';
-    const errorText = detail.error ? ' — ' + detail.error : '';
-    const label = (detail.name || detail.id || 'Semantic model') + ' — ' + (detail.workspaceName || detail.workspaceId || '') + ': ' + (detail.status || 'Pending') + errorText;
+    else if (detail.status === 'Failed' || detail.status === 'Unknown') cls = 'failed';
+    const errorText = detail.error ? ' - ' + detail.error : '';
+    const label = (detail.name || detail.id || 'Semantic model') + ' - ' + (detail.workspaceName || detail.workspaceId || '') + ': ' + (detail.status || 'Pending') + errorText;
     return '<div class="item-status-row"><span class="dot ' + cls + '"></span><span>' + escHtml(label) + '</span></div>';
   }).join('');
 }
@@ -1304,19 +2154,19 @@ function renderRebindProfileList() {
   const list = document.getElementById('rebindProfileList');
   const info = document.getElementById('rebindInfo');
   if (rebindProfiles.length === 0) {
-    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">No saved rebind profiles.<br>Fill in the form and click <strong>Save Profile</strong>.</div>';
+    list.innerHTML = '<div class="list-empty">No saved rebind profiles yet.<br>Fill in the form and click <strong>Save Profile</strong>.</div>';
     if (info && currentTab === 'rebind') info.style.display = '';
     return;
   }
   if (info && currentTab === 'rebind') info.style.display = 'none';
   list.innerHTML = rebindProfiles.map((p, index) => `
-    <div class="profile-card${selectedRebindId === p.name ? ' selected' : ''}" onclick="selectRebindProfileByIndex(${index})" style="border-left:3px solid var(--accent2);">
-      <div class="name">${escHtml(p.name)}</div>
-      <div class="ids">
-        <span>Path: ${escHtml(p.reportPath || '')}</span>
-        <span>Mappings: ${(p.mappings || []).length}</span>
-      </div>
-    </div>
+    <button type="button" class="profile-card${selectedRebindId === p.name ? ' selected' : ''}" onclick="selectRebindProfileByIndex(${index})">
+      <span class="name">${escHtml(p.name)}</span>
+      <span class="ids">
+        <span>${(p.mappings || []).length + ((p.mappings || []).length === 1 ? ' mapping' : ' mappings')}</span>
+        <span class="mono" title="${escHtml(p.reportPath || '')}">${escHtml(p.reportPath || 'No folder set')}</span>
+      </span>
+    </button>
   `).join('');
 }
 
@@ -1436,12 +2286,15 @@ function renderPartitionRefreshProfileList() {
   const list = document.getElementById('partitionRefreshProfileList');
   if (!list) return;
   if (partitionRefreshProfiles.length === 0) {
-    list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text2);font-size:13px;">No saved partition refresh profiles.</div>';
+    list.innerHTML = '<div class="list-empty">No saved partition refresh profiles yet.<br>Fill in the form and click <strong>Save Profile</strong>.</div>';
     return;
   }
   list.innerHTML = partitionRefreshProfiles.map(function(p, index) {
-    return '<div class="profile-card' + (selectedPartitionRefreshId === p.name ? ' selected' : '') + '" onclick="selectPartitionRefreshProfileByIndex(' + index + ')" style="border-left:3px solid var(--green);">' +
-      '<div class="name">' + escHtml(p.name) + '</div><div class="ids"><span>Table: ' + escHtml(p.TableName) + '</span><span>Partitions: ' + (p.Partitions || []).length + '</span></div></div>';
+    const partitionCount = (p.Partitions || []).length;
+    const modelName = p.DatasetName || catalogNames.models[catalogKey(p.WorkspaceId, p.DatasetId)] || '';
+    return '<button type="button" class="profile-card' + (selectedPartitionRefreshId === p.name ? ' selected' : '') + '" onclick="selectPartitionRefreshProfileByIndex(' + index + ')">' +
+      '<span class="name">' + escHtml(p.name) + '</span><span class="ids"><span>' + escHtml(p.TableName) + '</span><span>' + partitionCount + (partitionCount === 1 ? ' partition' : ' partitions') + '</span>' +
+      (modelName ? '<span class="ws-name">' + escHtml(modelName) + '</span>' : '') + '</span></button>';
   }).join('');
 }
 
@@ -1460,6 +2313,10 @@ function selectPartitionRefreshProfile(name) {
   document.getElementById('partitionDatasetId').value = p.DatasetId || '';
   document.getElementById('partitionTableName').value = p.TableName || '';
   document.getElementById('partitionNames').value = (p.Partitions || []).join('\n');
+  rememberWorkspaceName(p.WorkspaceId, p.WorkspaceName);
+  if (p.DatasetName && isValidGuid(p.WorkspaceId) && isValidGuid(p.DatasetId)) catalogNames.models[catalogKey(p.WorkspaceId, p.DatasetId)] = p.DatasetName;
+  setPickerNote('partitionPickerNote', '');
+  showPartitionNames();
   document.getElementById('btnDeletePartitionRefresh').disabled = false;
   renderPartitionRefreshProfileList();
   if (currentTab === 'partition-refresh') document.getElementById('pageTitle').textContent = name;
@@ -1479,6 +2336,9 @@ function newPartitionRefreshProfile() {
   selectedPartitionRefreshId = null;
   localStorage.removeItem('partition-refresh-selected');
   ['partitionProfileName','partitionWorkspaceId','partitionDatasetId','partitionTableName','partitionNames'].forEach(function(id) { document.getElementById(id).value = ''; });
+  setPickerText('pws', '');
+  setPickerText('pmodel', '');
+  setPickerNote('partitionPickerNote', '');
   document.getElementById('btnDeletePartitionRefresh').disabled = true;
   document.getElementById('pageTitle').textContent = 'Partition Refresh';
   document.getElementById('partitionRefreshState').textContent = 'No partition refresh request has been loaded. Status checks use GET and never resubmit.';
@@ -1488,13 +2348,21 @@ function newPartitionRefreshProfile() {
 
 function getPartitionRefreshForm() {
   const rawLines = document.getElementById('partitionNames').value.split(/\r?\n/);
-  return {
+  const workspaceId = document.getElementById('partitionWorkspaceId').value.trim();
+  const datasetId = document.getElementById('partitionDatasetId').value.trim();
+  const form = {
     name: document.getElementById('partitionProfileName').value.trim(),
-    WorkspaceId: document.getElementById('partitionWorkspaceId').value.trim(),
-    DatasetId: document.getElementById('partitionDatasetId').value.trim(),
+    WorkspaceId: workspaceId,
+    DatasetId: datasetId,
     TableName: document.getElementById('partitionTableName').value,
     Partitions: rawLines
   };
+  // Names are kept for display only; the IDs above are what the refresh uses.
+  const workspaceName = catalogNames.workspaces[workspaceId.toLowerCase()];
+  const datasetName = catalogNames.models[catalogKey(workspaceId, datasetId)];
+  if (workspaceName) form.WorkspaceName = workspaceName;
+  if (datasetName) form.DatasetName = datasetName;
+  return form;
 }
 
 function validatePartitionRefreshForm(p) {
@@ -1542,7 +2410,9 @@ async function startPartitionRefresh() {
   const p = getPartitionRefreshForm();
   const error = validatePartitionRefreshForm(p);
   if (error) return alert(error);
-  const confirmation = 'REAL REMOTE REFRESH\n\nWorkspace ID: ' + p.WorkspaceId + '\nDataset ID: ' + p.DatasetId + '\nTable: ' + p.TableName +
+  const confirmation = 'REAL REMOTE REFRESH\n\n' +
+    (p.WorkspaceName ? 'Workspace: ' + p.WorkspaceName + '\n' : '') + 'Workspace ID: ' + p.WorkspaceId + '\n' +
+    (p.DatasetName ? 'Semantic model: ' + p.DatasetName + '\n' : '') + 'Dataset ID: ' + p.DatasetId + '\nTable: ' + p.TableName +
     '\nPartitions:\n- ' + p.Partitions.join('\n- ') + '\n\nCommit mode: Transactional\nApply refresh policy: No\n\nSubmit this enhanced refresh now?';
   if (!confirm(confirmation)) return;
   partitionRefreshSubmitting = true;
@@ -1634,10 +2504,18 @@ async function startRefresh() {
   const ws = document.getElementById('workspaceId').value.trim();
   const enteredDfs = dataflows.map(function(item) { return (item.value || '').trim(); }).filter(Boolean);
   const validDfs = getValidDataflows();
+  // Dataflows from another workspace travel with their own workspace.
+  const otherDfs = getOtherWorkspaceDataflows();
   const modelResult = getSemanticModelValidation();
   const emailResult = validateNotifyEmails(true);
-  if (!isValidGuid(ws)) return alert('Enter a valid dataflow workspace ID.');
-  if (validDfs.length === 0 || validDfs.length !== enteredDfs.length) return alert('Enter at least one dataflow and make every dataflow ID a valid GUID.');
+  // Model only: the profile's dataflows stay in the form but are not sent, so the
+  // runner refreshes the semantic models alone. Each model carries its own workspace.
+  // A profile that lists no dataflows at all is model-only without the box.
+  const modelOnly = document.getElementById('modelOnly').checked || enteredDfs.length === 0;
+  if (!modelOnly) {
+    if (validDfs.length > 0 && !isValidGuid(ws)) return alert('Choose the workspace of the dataflows, or tick "Model only".');
+    if (validDfs.length + otherDfs.length !== enteredDfs.length) return alert('Make every dataflow ID a valid GUID, or tick "Model only".');
+  }
   if (!modelResult.valid || modelResult.models.length === 0) return alert('Add at least one semantic model with valid workspace and dataset GUIDs.');
   if (!emailResult.valid) return alert('Correct the notification email addresses before starting.');
 
@@ -1649,16 +2527,21 @@ async function startRefresh() {
   document.getElementById('emailWarning').style.display = 'none';
   document.getElementById('emailWarning').textContent = '';
   renderSemanticModelStatus(modelResult.models.map(function(model) {
-    return { id: model.DatasetId, workspaceId: model.WorkspaceId, status: 'Pending' };
+    const row = semanticModels.find(function(r) { return sameGuid(r.workspaceId, model.WorkspaceId) && sameGuid(r.datasetId, model.DatasetId); }) || {};
+    return { id: model.DatasetId, workspaceId: model.WorkspaceId, name: row.name || catalogNames.models[catalogKey(model.WorkspaceId, model.DatasetId)] || '', workspaceName: row.workspaceName || '', status: 'Pending' };
   }));
+  // No local log line here: pollStatus appends the server's lines after the ones
+  // already shown, so an extra local line would hide the runner's first line.
+  if (modelOnly) setDataflowSkipped(true);
 
   try {
     const resp = await fetch(API + '/api/refresh/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        WorkspaceId: ws,
-        DataflowIds: validDfs,
+        WorkspaceId: isValidGuid(ws) ? ws : '',
+        DataflowIds: modelOnly ? [] : validDfs,
+        Dataflows: modelOnly ? [] : otherDfs,
         SemanticModels: modelResult.models,
         NotificationRecipients: emailResult.addresses,
         EmailDryRun: document.getElementById('emailDryRun').checked
@@ -1689,7 +2572,7 @@ async function pollStatus() {
     const resp = await fetch(API + '/api/refresh/status');
     const state = await resp.json();
 
-    // Render logs — always to Refresh container (polling continues even if Rebind tab active)
+    // Render logs - always to Refresh container (polling continues even if Rebind tab active)
     if (state.logs && state.logs.length > 0) {
       const logsEl = document.getElementById('logsRefresh');
       const currentCount = logsEl.querySelectorAll('.log-entry').length;
@@ -1707,8 +2590,12 @@ async function pollStatus() {
       }
     }
 
-    // Update dots
-    updateDot('dotDataflow', state.dataflowStatus);
+    // Update dots. A run with no dataflow items but with semantic models is a
+    // model-only run: its dataflow dot stays neutral instead of turning green.
+    // Decided from the status itself, so it also holds after a page reload.
+    const dataflowsSkipped = (state.dataflowDetails || []).length === 0 && (state.semanticModelDetails || []).length > 0;
+    setDataflowSkipped(dataflowsSkipped);
+    if (!dataflowsSkipped) updateDot('dotDataflow', state.dataflowStatus);
     updateDot('dotDataset', state.datasetStatus);
     renderSemanticModelStatus(state.semanticModelDetails || []);
     const emailWarning = document.getElementById('emailWarning');
@@ -1729,16 +2616,16 @@ async function pollStatus() {
       stopPolling();
       document.getElementById('btnStart').disabled = false;
     } else if (state.result === 'Succeeded' || (state.dataflowStatus === 'Success' && state.datasetStatus === 'Completed')) {
-      setStatus(state.emailWarning ? 'Done — email warning' : 'Done', 'done');
+      setStatus(state.emailWarning ? 'Done - email warning' : 'Done', 'done');
       stopPolling();
       document.getElementById('btnStart').disabled = false;
     } else if (!workerSeenRunning) {
-      // Worker hasn't started yet — still initializing (or died silently)
+      // Worker hasn't started yet - still initializing (or died silently)
       // Keep "Starting..." badge; if it stays too long, user will notice
       // After 10s of no worker activity, flag as likely dead
       setStatus('Starting...', 'running');
     } else {
-      // Was running, now not — worker crashed without setting error
+      // Was running, now not - worker crashed without setting error
       setStatus('Worker died', 'failed');
       stopPolling();
       document.getElementById('btnStart').disabled = false;
@@ -1754,7 +2641,7 @@ function stopPolling() {
 }
 
 // ============================================================
-// Rebind — Mapping rows
+// Rebind - Mapping rows
 // ============================================================
 function addMapping() {
   invalidateRebindScan();
@@ -1786,7 +2673,7 @@ function renderMappingList() {
       '<option value="Dataset"' + (m.type === 'Dataset' ? ' selected' : '') + '>Dataset</option>' +
       '</select></div>' +
       '<div class="form-group"><label>Old GUID</label><input type="text" id="from_' + m.id + '" class="' + fromCls + '" value="' + escHtml(m.fromId || '') + '" placeholder="Old GUID" oninput="updateMappingGuid(' + m.id + ',\'from\',this.value)"></div>' +
-      '<button class="btn-row-swap" onclick="swapMapping(' + m.id + ')" title="Swap Old ↔ New">⇄</button>' +
+      '<button class="btn-row-swap" onclick="swapMapping(' + m.id + ')" title="Swap old and new GUID" aria-label="Swap old and new GUID">⇅</button>' +
       '<div class="form-group"><label>New GUID</label><input type="text" id="to_' + m.id + '" class="' + toCls + '" value="' + escHtml(m.toId || '') + '" placeholder="New GUID" oninput="updateMappingGuid(' + m.id + ',\'to\',this.value)"></div>' +
       (mappings.length > 1 ? '<button class="btn-row-remove" onclick="removeMapping(' + m.id + ')" title="Remove">&#x2715;</button>' : '<div></div>') +
       '</div>';
@@ -1869,7 +2756,7 @@ function invalidateRebindScan() {
 }
 
 // ============================================================
-// Rebind — Scan (Phase 1)
+// Rebind - Scan (Phase 1)
 // ============================================================
 async function startScan() {
   const reportPath = document.getElementById('reportPath').value.trim();
@@ -1917,7 +2804,7 @@ async function startScan() {
 }
 
 // ============================================================
-// Rebind — Apply (Phase 2+3, no confirmation modal)
+// Rebind - Apply (Phase 2+3, no confirmation modal)
 // ============================================================
 async function startApply() {
   if (rebindBusy || !scanComplete) return;
@@ -1966,7 +2853,7 @@ async function startApply() {
 }
 
 // ============================================================
-// Rebind — Status polling
+// Rebind - Status polling
 // ============================================================
 function startRebindPolling(phase) {
   stopRebindPolling();
@@ -1983,7 +2870,7 @@ async function pollRebindStatus(expectedPhase) {
     const resp = await fetch(API + '/api/rebind/status');
     const state = await resp.json();
 
-    // Render logs — always to Rebind container (polling continues even if Refresh tab active)
+    // Render logs - always to Rebind container (polling continues even if Refresh tab active)
     if (state.logs && state.logs.length > 0) {
       const logsEl = document.getElementById('logsRebind');
       const currentCount = logsEl.querySelectorAll('.log-entry').length;
@@ -2061,7 +2948,7 @@ async function pollRebindStatus(expectedPhase) {
 }
 
 // ============================================================
-// Rebind — plain-language summary and decision
+// Rebind - plain-language summary and decision
 // ============================================================
 function arrayOf(value) {
   if (!value) return [];
@@ -2166,7 +3053,7 @@ async function declineRebind() {
   const summary = document.getElementById('rebindSummary');
   summary.className = 'rebind-summary visible warning';
   document.getElementById('rebindSummaryIcon').textContent = '■';
-  document.getElementById('rebindSummaryTitle').textContent = 'Stopped — nothing was changed';
+  document.getElementById('rebindSummaryTitle').textContent = 'Stopped - nothing was changed';
   document.getElementById('rebindSummaryMessage').textContent = 'You chose not to apply the scan results. Scan was read-only, so the PBIP project is unchanged.';
   document.getElementById('rebindSummaryDetails').textContent = 'You can adjust the path or mappings and run another Scan when ready.';
   document.getElementById('btnSummaryApply').style.display = 'none';
@@ -2190,7 +3077,7 @@ function hideRebindSummary() {
 }
 
 // ============================================================
-// Rebind — Dot helpers
+// Rebind - Dot helpers
 // ============================================================
 function resetRebindDots() {
   ['dotScan','dotReplace','dotVerify'].forEach(id => {
@@ -2280,14 +3167,26 @@ function resetDots() {
   ['dotDataflow','dotDataset'].forEach(id => {
     document.getElementById(id).className = 'dot';
   });
+  setDataflowSkipped(false);
   const semanticStatus = document.getElementById('semanticStatusList');
   if (semanticStatus) semanticStatus.innerHTML = '';
+}
+
+function setDataflowSkipped(skipped) {
+  document.getElementById('dotDataflowLabel').textContent = skipped ? 'Dataflow (skipped)' : 'Dataflow';
+  if (skipped) document.getElementById('dotDataflow').className = 'dot';
+}
+
+function updateModelOnlyUI() {
+  // Dim the dataflow rows while they are ignored; they stay in the profile.
+  const modelOnly = document.getElementById('modelOnly').checked;
+  document.getElementById('dfList').style.opacity = modelOnly ? '0.45' : '';
 }
 
 function updateDot(id, status) {
   const el = document.getElementById(id);
   const done = ['Success','Succeeded','Completed'];
-  const fail = ['Failure','Failed','Cancelled','Disabled'];
+  const fail = ['Failure','Failed','Cancelled','Disabled','Unknown'];
   if (done.includes(status)) el.className = 'dot done';
   else if (fail.includes(status)) el.className = 'dot failed';
   else if (status && (status.indexOf('Running') === 0 || status.indexOf('InProgress') === 0)) el.className = 'dot active';

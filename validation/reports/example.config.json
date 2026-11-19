@@ -1,0 +1,55 @@
+{
+  "workspaceName": "Contoso TEST",
+  "reportName": "Sales Dashboard",
+  "semanticModelName": "Sales Dashboard",
+  "recipients": [],
+  "emailNote": "Сравнение до и после обновления. PASS: в пределах нормы. WARN: изменение от 10% (всего строк от 5%) или последний период старше 2 месяцев. FAIL: изменение от 25% (всего строк от 15%), пропавший месяц, пустые данные или откат последнего периода. Структура модели показана для сведения и на результат не влияет.",
+  "modelStructure": true,
+  "artifactsRoot": "%LOCALAPPDATA%\\PowerBIValidation\\reports",
+  "checks": [
+    {
+      "id": "sales_by_month",
+      "label": "Sales Amount by month",
+      "kind": "table",
+      "query": "DEFINE VAR _last = MAX('Sales'[Date]) EVALUATE CALCULATETABLE(ADDCOLUMNS(VALUES('Calendar'[Year_Month]), \"Value\", [Sales Amount], \"SortKey\", CALCULATE(MIN('Calendar'[Date]))), 'Calendar'[Date] >= EDATE(_last, -{monthsBack}), 'Calendar'[Date] <= EOMONTH(_last, 0)) ORDER BY [SortKey]",
+      "keyField": "Calendar[Year_Month]",
+      "valueField": "Value",
+      "format": "N2",
+      "monthsBack": 13,
+      "warnPercent": 10,
+      "failPercent": 25
+    },
+    {
+      "id": "rows_total",
+      "label": "Rows total (Sales)",
+      "kind": "scalar",
+      "query": "EVALUATE ROW(\"Value\", COUNTROWS('Sales'))",
+      "valueField": "Value",
+      "format": "N0",
+      "warnPercent": 5,
+      "failPercent": 15,
+      "zeroVerdict": "FAIL"
+    },
+    {
+      "id": "rows_by_month",
+      "label": "Rows per month",
+      "kind": "table",
+      "query": "DEFINE VAR _last = MAX('Sales'[Date]) EVALUATE CALCULATETABLE(ADDCOLUMNS(VALUES('Calendar'[Year_Month]), \"Rows\", CALCULATE(COUNTROWS('Sales')), \"SortKey\", CALCULATE(MIN('Calendar'[Date]))), 'Calendar'[Date] >= EDATE(_last, -{monthsBack}), 'Calendar'[Date] <= EOMONTH(_last, 0)) ORDER BY [SortKey]",
+      "keyField": "Calendar[Year_Month]",
+      "valueField": "Rows",
+      "format": "N0",
+      "showMonths": false,
+      "monthsBack": 13,
+      "warnPercent": 10,
+      "failPercent": 25
+    },
+    {
+      "id": "fact_max_date",
+      "label": "Latest period (freshness)",
+      "kind": "scalar_date",
+      "query": "EVALUATE ROW(\"Value\", MAX('Sales'[Date]))",
+      "valueField": "Value",
+      "maxAgeMonths": 2
+    }
+  ]
+}
