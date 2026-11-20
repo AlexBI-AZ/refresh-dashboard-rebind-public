@@ -20,12 +20,13 @@ is exposed, then run `setup.bat` again with the new URL.
 - Device code: the sign-in is kept in a cache encrypted for the Windows user
   (`%LOCALAPPDATA%\PowerBIChainedRefresh\msalcache.bin3`). No token is written to the
   project folder.
-- Certificate: `setup.bat` creates the key pair inside `Cert:\CurrentUser\My` with a
-  non-exportable private key, so the key never leaves that PC. Only the public `.cer`
-  is exported, for the app owner to upload to the app registration. Never create,
-  copy or send a `.pfx`. Every certificate on one app signs in as that app and sees
-  every workspace the app can reach; remove a PC's certificate from the app
-  registration when the PC no longer needs it.
+- Certificate: set up separately, never by `setup.bat`, which only suggests a
+  certificate that already works on the PC and never creates, imports or exports one.
+  The private key stays in `Cert:\CurrentUser\My` on the PC that uses it; only the
+  public part is uploaded to the app registration. Never copy or send a `.pfx`. Every
+  certificate on one app signs in as that app and sees every workspace the app can
+  reach; remove a PC's certificate from the app registration when the PC no longer
+  needs it.
 
 ## Before publishing
 

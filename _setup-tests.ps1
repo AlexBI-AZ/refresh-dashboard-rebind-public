@@ -25,8 +25,7 @@ $parseErrors = $null
 [System.Management.Automation.Language.Parser]::ParseFile($setupPath, [ref]$null, [ref]$parseErrors) | Out-Null
 Assert ($parseErrors.Count -eq 0) "setup.ps1 must parse: $($parseErrors | Select-Object -First 1)"
 $setupText = [System.IO.File]::ReadAllText($setupPath)
-Assert ($setupText -notmatch '(?i)(Export|Import)-PfxCertificate|X509ContentType\]::(Pfx|Pkcs12)|\.Export\(|"[^"]*\.pfx"') "setup.ps1 must never create, import or copy a .pfx"
-Assert ($setupText -match 'KeyExportPolicy = "NonExportable"') "The certificate key is created non-exportable"
+Assert ($setupText -notmatch '(?i)New-SelfSignedCertificate|(Export|Import)-(Pfx)?Certificate|CertificateRequest|X509ContentType|OpenFlags\]::(ReadWrite|MaxAllowed)') "setup.ps1 must never create, import or export a certificate"
 Assert ($setupText -notmatch '(?i)\b(Set-Content|Add-Content|Out-File)\b') "setup.ps1 must not write text files (the flow URL lives only in a user variable)"
 Assert ($setupText -notmatch '(?i)Set-PSRepository|InstallationPolicy') "setup.ps1 must not change the PSGallery trust setting"
 Assert ($setupText -notmatch '(?i)Machine"\)') "setup.ps1 must not write machine-wide variables"
@@ -78,41 +77,18 @@ function Read-SetupLine([string]$Prompt) { if ($script:Answers.Count -eq 0) { th
 function Read-SetupSecret([string]$Prompt) { if ($script:SecretAnswers.Count -eq 0) { throw "Unexpected secret question: $Prompt" }; return $script:SecretAnswers.Dequeue() }
 function Get-SetupShortcutPaths { return @((Join-Path $sandbox "Desktop\Power BI Control Panel.lnk"), (Join-Path $sandbox "Programs\Power BI Control Panel.lnk")) }
 function Get-SetupIconPath { return (Join-Path $sandbox "AppData\app.ico") }
-function Get-SetupCertificateExportPath { return (Join-Path $sandbox "Desktop\PowerBI-ControlPanel-test.cer") }
 
-function New-TestCertificate([string]$Subject, [int]$Days = 730) {
-    # In memory only (never in a certificate store).
+function New-TestCertificate([string]$Subject, [switch]$Expired) {
+    # In memory only (never in a certificate store); stands in for one set up earlier.
     $rsa = [System.Security.Cryptography.RSA]::Create(2048)
     $request = New-Object System.Security.Cryptography.X509Certificates.CertificateRequest($Subject, $rsa, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
-    return $request.CreateSelfSigned([DateTimeOffset]::Now.AddDays(-1), [DateTimeOffset]::Now.AddDays($Days))
-}
-$script:LastCertificateSubject = ""
-function New-SetupCertificate([string]$Subject) {
-    Register-Call "new-cert"
-    $script:LastCertificateSubject = $Subject
-    $certificate = New-TestCertificate $Subject
-    $script:FakeStore.Add($certificate)
-    return $certificate
-}
-function Find-SetupCertificate([string]$Thumbprint) {
-    $now = Get-Date
-    if ($Thumbprint) {
-        $named = $script:FakeStore | Where-Object { $_.Thumbprint -eq $Thumbprint -and $_.NotAfter -gt $now.AddDays(30) } | Select-Object -First 1
-        if ($named) { return $named }
-    }
-    return ($script:FakeStore | Where-Object { $_.Subject -like "$($script:SetupCertificatePrefix)*" -and $_.NotAfter -gt $now.AddDays(30) } | Select-Object -First 1)
+    if ($Expired) { return $request.CreateSelfSigned([DateTimeOffset]::Now.AddDays(-30), [DateTimeOffset]::Now.AddDays(-1)) }
+    return $request.CreateSelfSigned([DateTimeOffset]::Now.AddDays(-1), [DateTimeOffset]::Now.AddDays(730))
 }
 function Get-PowerBiServicePrincipalCertificate([string]$Thumbprint) {
     $found = $script:FakeStore | Where-Object { $_.Thumbprint -eq $Thumbprint } | Select-Object -First 1
     if (-not $found) { throw "No certificate with thumbprint $Thumbprint exists." }
     return $found
-}
-$realExport = ${function:Export-SetupPublicCertificate}
-function Export-SetupPublicCertificate($Certificate, [string]$Path) {
-    Register-Call "export-cer"
-    $folder = Split-Path -Parent $Path
-    if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
-    & $realExport $Certificate $Path
 }
 $realShortcut = ${function:New-SetupShortcut}
 function New-SetupShortcut { param([string]$Path, [string]$Target, [string]$WorkingDirectory, [string]$IconPath) Register-Call "shortcut"; & $realShortcut -Path $Path -Target $Target -WorkingDirectory $WorkingDirectory -IconPath $IconPath }
@@ -148,15 +124,6 @@ $client = "00000000-0000-0000-0000-00000000000b"
 $flowUrl = "https://flow.example.invalid/workflows/0000/run?sig=TEST-SECRET-VALUE"
 
 try {
-    # --- the exact certificate arguments bind to the real cmdlet (nothing is created) -----
-    $certParameters = Get-SetupCertificateParameters "CN=Power BI Control Panel - setup test"
-    Assert ($certParameters.KeyExportPolicy -eq "NonExportable") "The private key must be non-exportable"
-    Assert ($certParameters.CertStoreLocation -eq "Cert:\CurrentUser\My") "The certificate goes to the current user's store"
-    $before = @(Get-ChildItem Cert:\CurrentUser\My).Count
-    New-SelfSignedCertificate @certParameters -WhatIf 6>$null | Out-Null
-    Assert (@(Get-ChildItem Cert:\CurrentUser\My).Count -eq $before) "-WhatIf must not create a certificate"
-    $checks++
-
     # --- the icon is a valid .ico that Windows can load ----------------------------------
     $iconBytes = Get-SetupIconBytes (Join-Path $appRoot "favicon.png")
     Assert ($iconBytes[0] -eq 0 -and $iconBytes[2] -eq 1 -and $iconBytes[4] -eq 1) "ICO header: type 1, one image"
@@ -213,59 +180,86 @@ try {
     Assert ($run.Readiness.Ready) "Still ready"
     $checks++
 
-    # --- the question: Enter means device code, 2 means certificate ----------------------
+    # --- no certificate on the PC: no question, device code, nothing set ------------------
     Reset-Fakes
+    $run = Invoke-TestSetup @{ SkipWebhook = $true; NoLaunch = $true }
+    Assert ($script:FakeVars.Count -eq 0 -and $script:Calls.Count -eq 0) "Without a certificate setup asks nothing and sets nothing"
+    Assert ($run.Text -match "Sign-in: device code") "Device code is used"
+    Assert ($run.Text -notmatch "Use the certificate") "No certificate is offered"
+    $run = Invoke-TestSetup @{ SignIn = "Certificate"; SkipWebhook = $true; NoLaunch = $true }
+    Assert ($script:FakeVars.Count -eq 0 -and $script:Calls.Count -eq 0) "-SignIn Certificate without a certificate creates and sets nothing"
+    Assert ($run.Text -match "does not create certificates") "It says that setup does not create certificates"
+    $checks++
+
+    # --- a working certificate is suggested; Enter keeps it and changes nothing ------------
+    Reset-Fakes
+    $certificate = New-TestCertificate "CN=Existing test certificate"
+    $script:FakeStore.Add($certificate)
+    $script:FakeVars["POWERBI_REFRESH_TENANT_ID"] = $tenant
+    $script:FakeVars["POWERBI_REFRESH_CLIENT_ID"] = $client
+    $script:FakeVars["POWERBI_REFRESH_CERT_THUMBPRINT"] = $certificate.Thumbprint
     $script:Answers.Enqueue("")
     $run = Invoke-TestSetup @{ SkipWebhook = $true; NoLaunch = $true }
-    Assert ($run.Text -match "Device code chosen") "Enter chooses device code"
-    Assert ($script:FakeVars.Count -eq 0) "Still nothing set"
+    Assert ($run.Text -match "already has a working certificate") "The detected certificate is suggested"
+    Assert ($script:Calls.Count -eq 0) "Keeping the certificate changes nothing (calls: $($script:Calls -join ', '))"
+    Assert ($run.Text -match "Sign-in: certificate") "The certificate is used"
+    Assert ((Get-ReadinessItem $run "Sign-in").Detail -match "certificate") "Readiness reports the certificate"
     $checks++
 
-    # --- certificate, first run ------------------------------------------------------------
+    # --- answering no switches to device code; yes switches back ---------------------------
     Reset-Fakes
-    $script:Answers.Enqueue("2")
-    $script:Answers.Enqueue("not-an-id")
-    $script:Answers.Enqueue($tenant)
-    $script:Answers.Enqueue($client)
+    $script:Answers.Enqueue("n")
     $run = Invoke-TestSetup @{ SkipWebhook = $true; NoLaunch = $true }
-    Assert (@($script:Calls | Where-Object { $_ -eq "new-cert" }).Count -eq 1) "One certificate is created"
-    Assert ($script:LastCertificateSubject -like "CN=Power BI Control Panel - *") "The certificate is named for this app, user and PC"
-    $newCert = $script:FakeStore[0]
-    Assert ($script:FakeVars["POWERBI_REFRESH_AUTH_MODE"] -eq "service-principal") "Mode is set to service-principal"
-    Assert ($script:FakeVars["POWERBI_REFRESH_TENANT_ID"] -eq $tenant) "Tenant ID is saved (after one invalid answer)"
-    Assert ($script:FakeVars["POWERBI_REFRESH_CLIENT_ID"] -eq $client) "Client ID is saved"
-    Assert ($script:FakeVars["POWERBI_REFRESH_CERT_THUMBPRINT"] -eq $newCert.Thumbprint) "Thumbprint of the new certificate is saved"
-    $cerPath = Get-SetupCertificateExportPath
-    Assert (Test-Path -LiteralPath $cerPath) "The public .cer is exported"
-    $exported = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2(, [System.IO.File]::ReadAllBytes($cerPath))
-    Assert ($exported.Thumbprint -eq $newCert.Thumbprint -and -not $exported.HasPrivateKey) "The .cer holds the same certificate without its private key"
-    Assert (-not (Get-ChildItem -LiteralPath $sandbox -Recurse -Filter "*.pfx")) "No .pfx anywhere"
+    Assert ($script:FakeVars["POWERBI_REFRESH_AUTH_MODE"] -eq "delegated") "No sets POWERBI_REFRESH_AUTH_MODE to delegated"
+    Assert ((@($script:Calls) -join ",") -eq "var:POWERBI_REFRESH_AUTH_MODE") "Only that variable is written"
+    Assert ($script:FakeVars["POWERBI_REFRESH_CERT_THUMBPRINT"] -eq $certificate.Thumbprint) "The certificate settings are left in place"
     Assert ($script:SetupSignInChanged) "The sign-in change is noticed (for the restart note)"
-    Assert ((Get-ReadinessItem $run "Sign-in").Status -eq "OK" -and (Get-ReadinessItem $run "Sign-in").Detail -match "certificate") "Readiness reports the certificate"
+    Assert ((Get-ReadinessItem $run "Sign-in").Detail -match "device code") "Readiness reports device code"
+    Reset-Fakes
+    $script:Answers.Enqueue("n")
+    $run = Invoke-TestSetup @{ SkipWebhook = $true; NoLaunch = $true }
+    Assert ($script:Calls.Count -eq 0) "Saying no again changes nothing"
+    Reset-Fakes
+    $script:Answers.Enqueue("y")
+    $run = Invoke-TestSetup @{ SkipWebhook = $true; NoLaunch = $true }
+    Assert ($script:FakeVars["POWERBI_REFRESH_AUTH_MODE"] -eq "service-principal") "Yes undoes an earlier no"
+    Assert ((Get-ReadinessItem $run "Sign-in").Detail -match "certificate") "Readiness reports the certificate again"
+    Reset-Fakes
+    $script:SetupDryRun = $true
+    $script:ForbidChanges = $true
+    $script:Answers.Enqueue("n")
+    $run = Invoke-TestSetup @{ SkipWebhook = $true; NoLaunch = $true }
+    Assert (@($script:SetupChanges | Where-Object { $_ -eq "would: set the user variable POWERBI_REFRESH_AUTH_MODE to delegated" }).Count -eq 1) "A dry run reports the switch"
+    Assert ($script:FakeVars["POWERBI_REFRESH_AUTH_MODE"] -eq "service-principal") "A dry run does not switch"
     $checks++
 
-    # --- certificate, second run reuses everything ----------------------------------------
-    Reset-Fakes
-    $run = Invoke-TestSetup @{ SignIn = "Certificate"; SkipWebhook = $true; NoLaunch = $true }
-    Assert ($script:Calls.Count -eq 0) "A second certificate run changes nothing (calls: $($script:Calls -join ', '))"
-    Assert ($script:FakeStore.Count -eq 1) "No second certificate"
-    Assert (-not $script:SetupSignInChanged) "No sign-in change on the second run"
+    # --- certificate settings without a usable certificate: device code is enforced --------
+    foreach ($case in @("missing", "expired")) {
+        Reset-Fakes
+        $script:FakeVars.Remove("POWERBI_REFRESH_AUTH_MODE")
+        $script:FakeStore.Clear()
+        if ($case -eq "expired") {
+            $old = New-TestCertificate "CN=Expired test certificate" -Expired
+            $script:FakeStore.Add($old)
+            $script:FakeVars["POWERBI_REFRESH_CERT_THUMBPRINT"] = $old.Thumbprint
+        }
+        $run = Invoke-TestSetup @{ SkipWebhook = $true; NoLaunch = $true }
+        Assert ($run.Text -notmatch "Use the certificate") "A $case certificate is not offered"
+        Assert ($run.Text -match "cannot be used") "The $case certificate is explained"
+        Assert ($script:FakeVars["POWERBI_REFRESH_AUTH_MODE"] -eq "delegated") "With a $case certificate, device code is set"
+        Assert ($run.Readiness.Ready -and (Get-ReadinessItem $run "Sign-in").Detail -match "device code") "Ready with device code ($case certificate)"
+    }
     $checks++
 
-    # --- device code chosen on a certificate PC: nothing changes, a note explains --------
+    # --- the readiness check alone reports a broken certificate, with the reason ----------
     Reset-Fakes
-    $run = Invoke-TestSetup @{ SignIn = "DeviceCode"; SkipWebhook = $true; NoLaunch = $true }
-    Assert ($script:Calls.Count -eq 0) "Device code changes nothing even on a certificate PC"
-    Assert ($run.Text -match "keep using the certificate") "The note explains that the certificate stays in use"
-    $checks++
-
-    # --- a certificate that has gone missing: Not ready, with the reason ------------------
-    Reset-Fakes
+    $script:FakeVars.Remove("POWERBI_REFRESH_AUTH_MODE")
     $script:FakeStore.Clear()
     $run = Invoke-TestSetup @{ CheckOnly = $true }
     Assert (-not $run.Readiness.Ready) "Missing certificate is Not ready"
     Assert ((Get-ReadinessItem $run "Sign-in").Detail -match "No certificate") "The reason names the missing certificate"
     Assert ($run.Text -match "Not ready:") "The check prints Not ready with reasons"
+    Assert ($script:Calls.Count -eq 0) "The check changes nothing"
     $checks++
 
     # --- broken settings are reported, not fixed ------------------------------------------

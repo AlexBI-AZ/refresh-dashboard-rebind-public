@@ -9,22 +9,19 @@
     1. Unblocks the files in this folder (downloaded ZIPs mark them as blocked).
     2. Checks Windows PowerShell 5.1 and Microsoft Edge.
     3. Installs MSAL.PS for the current user without the NuGet and PSGallery prompts.
-    4. Sign-in: device code (sets nothing) or certificate (a non-exportable self-signed
-       certificate in Cert:\CurrentUser\My, four user variables, and the public .cer for
-       the app owner). A .pfx is never created, imported or copied.
+    4. Sign-in: device code. Only when a working certificate is already set up on this PC
+       (the three certificate variables and the certificate with its private key in
+       Cert:\CurrentUser\My) does setup suggest using it. Setup never creates, imports or
+       exports a certificate.
     5. Optionally saves the Power Automate flow URL as the user variable
        REFRESH_EMAIL_WEBHOOK_URL. The URL is never written to a file.
     6. Creates Desktop and Start menu shortcuts to launch-app.bat.
     7. Runs a read-only readiness check, then opens the panel.
 
 .PARAMETER SignIn
-    DeviceCode or Certificate. Skips the sign-in question.
-
-.PARAMETER TenantId
-    Directory (tenant) ID for certificate sign-in. Asked for when missing.
-
-.PARAMETER ClientId
-    Application (client) ID for certificate sign-in. Asked for when missing.
+    DeviceCode or Certificate. Answers the certificate question in advance. Certificate
+    takes effect only when a working certificate is already set up; otherwise device code
+    is used.
 
 .PARAMETER SkipWebhook
     Does not ask for the Power Automate flow URL.
@@ -42,8 +39,6 @@
 param(
     [ValidateSet("", "DeviceCode", "Certificate")]
     [string]$SignIn = "",
-    [string]$TenantId = "",
-    [string]$ClientId = "",
     [switch]$SkipWebhook,
     [switch]$NoLaunch,
     [switch]$CheckOnly,
@@ -56,15 +51,7 @@ $script:SetupChanges = New-Object System.Collections.Generic.List[string]
 $script:SetupSignInChanged = $false
 $script:SetupAppName = "Power BI Control Panel"
 $script:SetupPanelPort = 8765
-$script:SetupCertificatePrefix = "CN=Power BI Control Panel"
-$script:SetupCertificateYears = 2
 $script:SetupWebhookVariable = "REFRESH_EMAIL_WEBHOOK_URL"
-$script:SetupSignInVariables = @(
-    "POWERBI_REFRESH_AUTH_MODE"
-    "POWERBI_REFRESH_TENANT_ID"
-    "POWERBI_REFRESH_CLIENT_ID"
-    "POWERBI_REFRESH_CERT_THUMBPRINT"
-)
 
 # The shared sign-in module: the readiness check asks it which mode this PC uses and
 # whether the certificate works, exactly as the panel and the refresh runner will.
@@ -170,22 +157,26 @@ function Get-SetupVariable([string]$Name) {
     return (Get-PowerBiConfigValue $Name).Value
 }
 
-function Find-SetupCertificate {
-    # Returns a usable certificate from Cert:\CurrentUser\My: the one named by the
-    # thumbprint variable, else the newest one this setup made earlier. Read-only.
-    param([string]$Thumbprint)
-
-    $now = Get-Date
-    $all = @(Get-ChildItem -Path "Cert:\CurrentUser\My" -ErrorAction SilentlyContinue)
-    if ($Thumbprint) {
-        $normalized = ($Thumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
-        $named = $all | Where-Object { $_.Thumbprint -eq $normalized } | Select-Object -First 1
-        if ($named -and $named.HasPrivateKey -and $named.NotAfter -gt $now.AddDays(30)) { return $named }
+function Get-SetupCertificateState {
+    # A certificate counts as detected only when it is already fully set up on this PC: the
+    # three certificate variables are set, and the certificate they name is in
+    # Cert:\CurrentUser\My with a private key this user can sign with, and has not expired.
+    # Setup never creates, imports or exports a certificate. Read-only.
+    $set = @($script:ServicePrincipalVariables | Where-Object { Get-SetupVariable $_ })
+    if ($set.Count -eq 0) { return [pscustomobject]@{ Certificate = $null; Problem = "" } }
+    if ($set.Count -lt $script:ServicePrincipalVariables.Count) {
+        $missing = @($script:ServicePrincipalVariables | Where-Object { $set -notcontains $_ })
+        return [pscustomobject]@{ Certificate = $null; Problem = "these variables are missing: $($missing -join ', ')" }
     }
-    return ($all |
-        Where-Object { $_.Subject -like "$($script:SetupCertificatePrefix)*" -and $_.HasPrivateKey -and $_.NotAfter -gt $now.AddDays(30) } |
-        Sort-Object NotAfter -Descending |
-        Select-Object -First 1)
+    try {
+        $certificate = Get-PowerBiServicePrincipalCertificate -Thumbprint (Get-SetupVariable "POWERBI_REFRESH_CERT_THUMBPRINT")
+    } catch {
+        return [pscustomobject]@{ Certificate = $null; Problem = (Get-PowerBiSafeText $_) }
+    }
+    if ($certificate.NotAfter -le (Get-Date)) {
+        return [pscustomobject]@{ Certificate = $null; Problem = "the certificate expired on $($certificate.NotAfter.ToString('yyyy-MM-dd'))" }
+    }
+    return [pscustomobject]@{ Certificate = $certificate; Problem = "" }
 }
 
 function Test-SetupPanelRunning {
@@ -211,10 +202,6 @@ function Get-SetupShortcutPaths {
 }
 
 function Get-SetupIconPath { return (Join-Path $env:LOCALAPPDATA "PowerBIControlPanel\app.ico") }
-
-function Get-SetupCertificateExportPath {
-    return (Join-Path ([Environment]::GetFolderPath("Desktop")) "PowerBI-ControlPanel-$($env:COMPUTERNAME)-$($env:USERNAME).cer")
-}
 
 function Test-SetupShortcut {
     param([string]$Path, [string]$Target, [string]$IconPath)
@@ -259,31 +246,6 @@ function Set-SetupUserVariable([string]$Name, [string]$Value) {
     [Environment]::SetEnvironmentVariable($Name, $Value, "User")
     # The current process keeps its old copy otherwise, and the readiness check reads it.
     [Environment]::SetEnvironmentVariable($Name, $Value, "Process")
-}
-
-function Get-SetupCertificateParameters([string]$Subject) {
-    # The private key is created inside the current user's store and cannot be exported,
-    # so it never leaves this PC. Only the public part is exported, for the app owner.
-    return @{
-        Subject = $Subject
-        CertStoreLocation = "Cert:\CurrentUser\My"
-        KeyExportPolicy = "NonExportable"
-        KeySpec = "Signature"
-        KeyAlgorithm = "RSA"
-        KeyLength = 2048
-        HashAlgorithm = "SHA256"
-        NotAfter = (Get-Date).AddYears($script:SetupCertificateYears)
-        FriendlyName = "Power BI Control Panel sign-in"
-    }
-}
-
-function New-SetupCertificate([string]$Subject) {
-    $parameters = Get-SetupCertificateParameters $Subject
-    return New-SelfSignedCertificate @parameters
-}
-
-function Export-SetupPublicCertificate($Certificate, [string]$Path) {
-    Export-Certificate -Cert $Certificate -FilePath $Path -Type CERT -Force | Out-Null
 }
 
 function Get-SetupIconBytes([string]$PngPath) {
@@ -354,113 +316,57 @@ function Invoke-SetupMsal {
     }
 }
 
-function Read-SetupSignInChoice {
-    param([string]$CurrentMode)
-
+function Read-SetupUseCertificate($Certificate) {
     Write-Host ""
-    Write-Host "  How should this PC sign in to Power BI?" -ForegroundColor White
-    Write-Host "    1  Device code: you sign in with your own work account, using a code."
-    Write-Host "       For people who start refreshes by hand. Nothing is stored except the sign-in cache."
-    Write-Host "    2  Certificate: the app signs in by itself, with a certificate made on this PC."
-    Write-Host "       For PCs that run refreshes unattended. The app owner must upload its public part."
-    if ($CurrentMode) { Write-SetupInfo "This PC currently uses: $CurrentMode." }
+    Write-Host "  This PC already has a working certificate for sign-in:" -ForegroundColor White
+    Write-SetupInfo "$($Certificate.Subject), expires $($Certificate.NotAfter.ToString('yyyy-MM-dd'))."
+    Write-SetupInfo "With it, refreshes sign in as the app, without a person (for unattended PCs)."
+    Write-SetupInfo "Without it, you sign in with your own account using a code (device code)."
     for ($attempt = 0; $attempt -lt 3; $attempt++) {
-        $answer = (Read-SetupLine "  Choose 1 or 2 [1]").Trim()
-        if ($answer -eq "" -or $answer -eq "1") { return "DeviceCode" }
-        if ($answer -eq "2") { return "Certificate" }
-        Write-SetupWarn "Type 1 or 2."
+        $answer = (Read-SetupLine "  Use the certificate? [Y/n]").Trim().ToLowerInvariant()
+        if ($answer -eq "" -or $answer -eq "y" -or $answer -eq "yes") { return $true }
+        if ($answer -eq "n" -or $answer -eq "no") { return $false }
+        Write-SetupWarn "Type y or n."
     }
-    return "DeviceCode"
+    return $true
 }
 
-function Read-SetupIdentifier {
-    param([string]$Label, [string]$Current, [string]$Given, [switch]$AllowDomain)
-
-    $pattern = '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
-    $domainPattern = '^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$'
-    $isValid = { param($v) ($v -match $pattern) -or ($AllowDomain -and $v -match $domainPattern) }
-    if ($Given) {
-        if (& $isValid $Given.Trim()) { return $Given.Trim() }
-        throw "$Label '$Given' is not a valid ID."
-    }
-    if ($Current -and (& $isValid $Current)) { return $Current }
-    for ($attempt = 0; $attempt -lt 3; $attempt++) {
-        $answer = (Read-SetupLine "  $Label (from the app owner)").Trim()
-        if (& $isValid $answer) { return $answer }
-        Write-SetupWarn "That is not a valid ID. It looks like 00000000-0000-0000-0000-000000000000."
-    }
-    throw "No valid $Label was given."
-}
-
-function Invoke-SetupCertificateSignIn {
-    param([string]$GivenTenantId, [string]$GivenClientId)
-
-    $tenant = Read-SetupIdentifier -Label "Directory (tenant) ID" -Current (Get-SetupVariable "POWERBI_REFRESH_TENANT_ID") -Given $GivenTenantId -AllowDomain
-    $client = Read-SetupIdentifier -Label "Application (client) ID" -Current (Get-SetupVariable "POWERBI_REFRESH_CLIENT_ID") -Given $GivenClientId
-
-    $certificate = Find-SetupCertificate -Thumbprint (Get-SetupVariable "POWERBI_REFRESH_CERT_THUMBPRINT")
-    if ($certificate) {
-        Write-SetupOk "Using the existing certificate $($certificate.Subject), expires $($certificate.NotAfter.ToString('yyyy-MM-dd'))"
-        $thumbprint = $certificate.Thumbprint
-    } else {
-        $subject = "$($script:SetupCertificatePrefix) - $($env:USERNAME) on $($env:COMPUTERNAME)"
-        $certificate = Invoke-SetupChange "create a non-exportable certificate '$subject' in Cert:\CurrentUser\My" { New-SetupCertificate $subject }
-        $thumbprint = if ($certificate) { $certificate.Thumbprint } else { "<new thumbprint>" }
-    }
-
-    $wanted = [ordered]@{
-        POWERBI_REFRESH_AUTH_MODE = "service-principal"
-        POWERBI_REFRESH_TENANT_ID = $tenant
-        POWERBI_REFRESH_CLIENT_ID = $client
-        POWERBI_REFRESH_CERT_THUMBPRINT = $thumbprint
-    }
-    foreach ($entry in $wanted.GetEnumerator()) {
-        if ((Get-SetupVariable $entry.Key) -eq $entry.Value) { Write-SetupOk "$($entry.Key) is already set"; continue }
-        $name = $entry.Key; $value = $entry.Value
-        Invoke-SetupChange "set the user variable $name" { Set-SetupUserVariable $name $value } | Out-Null
-        $script:SetupSignInChanged = $true
-    }
-
-    $exportPath = Get-SetupCertificateExportPath
-    $cert = $certificate
-    $exported = $false
-    if ($certificate -and (Test-Path -LiteralPath $exportPath)) {
-        try { $exported = ((New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($exportPath)).Thumbprint -eq $certificate.Thumbprint) } catch { $exported = $false }
-    }
-    if ($exported) { Write-SetupOk "The public certificate is already saved" }
-    else { Invoke-SetupChange "save the public certificate (no private key) to $exportPath" { Export-SetupPublicCertificate $cert $exportPath } | Out-Null }
-    Write-Host ""
-    Write-Host "  Send this file to the app owner: $exportPath" -ForegroundColor White
-    Write-SetupInfo "They upload it in Microsoft Entra: App registrations > the app > Certificates & secrets > Certificates."
-    Write-SetupInfo "It holds only the public key. Sign-in works once it is uploaded. Thumbprint: $thumbprint"
+function Set-SetupAuthMode([string]$Mode) {
+    if ((Get-SetupVariable "POWERBI_REFRESH_AUTH_MODE") -eq $Mode) { return }
+    Invoke-SetupChange "set the user variable POWERBI_REFRESH_AUTH_MODE to $Mode" { Set-SetupUserVariable "POWERBI_REFRESH_AUTH_MODE" $Mode } | Out-Null
+    $script:SetupSignInChanged = $true
 }
 
 function Invoke-SetupSignIn {
-    param([string]$Choice, [string]$GivenTenantId, [string]$GivenClientId)
+    # Device code unless a working certificate is already set up and the person keeps it.
+    param([string]$Choice)
 
     Write-SetupStep "Sign-in"
-    $currentMode = ""
-    try {
-        $currentMode = if ((Get-PowerBiAuthMode) -eq "service-principal") { "certificate" } else { "device code" }
-    } catch {
-        Write-SetupWarn (Get-PowerBiSafeText $_)
+    $state = Get-SetupCertificateState
+    $useCertificate = $false
+    if ($state.Certificate) {
+        if ($Choice -eq "Certificate") { $useCertificate = $true }
+        elseif ($Choice -eq "DeviceCode") { $useCertificate = $false }
+        else { $useCertificate = Read-SetupUseCertificate $state.Certificate }
+    } else {
+        if ($state.Problem) { Write-SetupWarn "Certificate settings were found, but they cannot be used: $($state.Problem)" }
+        if ($Choice -eq "Certificate") { Write-SetupWarn "No working certificate is set up on this PC, so device code is used. Setup does not create certificates." }
     }
-    if (-not $Choice) { $Choice = Read-SetupSignInChoice -CurrentMode $currentMode }
 
-    if ($Choice -eq "Certificate") {
-        try {
-            Invoke-SetupCertificateSignIn -GivenTenantId $GivenTenantId -GivenClientId $GivenClientId
-        } catch {
-            Write-SetupFail "Certificate sign-in was not set up: $(Get-PowerBiSafeText $_)"
-        }
+    if ($useCertificate) {
+        # Without POWERBI_REFRESH_AUTH_MODE the certificate is chosen already; only an
+        # explicit other value has to change.
+        $current = Get-SetupVariable "POWERBI_REFRESH_AUTH_MODE"
+        if ($current -and $current -ne "service-principal") { Set-SetupAuthMode "service-principal" }
+        Write-SetupOk "Sign-in: certificate ($($state.Certificate.Subject))"
         return
     }
 
-    Write-SetupOk "Device code chosen. Nothing to set: sign in from the panel with Authenticate for Refresh."
-    if ($currentMode -eq "certificate") {
-        Write-SetupWarn "This PC still has certificate settings, so the panel will keep using the certificate."
-        Write-SetupInfo "To use device code here, set the user variable POWERBI_REFRESH_AUTH_MODE to delegated. Setup does not change it."
-    }
+    # Device code. Nothing to set unless certificate settings would otherwise win.
+    $mode = $null
+    try { $mode = Get-PowerBiAuthMode } catch { $mode = $null }
+    if ($mode -ne "delegated") { Set-SetupAuthMode "delegated" }
+    Write-SetupOk "Sign-in: device code. Sign in from the panel with Authenticate for Refresh."
 }
 
 function Invoke-SetupWebhook {
@@ -602,8 +508,6 @@ function Write-SetupReadiness($Readiness) {
 function Invoke-Setup {
     param(
         [string]$SignIn,
-        [string]$TenantId,
-        [string]$ClientId,
         [switch]$SkipWebhook,
         [switch]$NoLaunch,
         [switch]$CheckOnly
@@ -634,7 +538,7 @@ function Invoke-Setup {
 
     Invoke-SetupUnblock
     Invoke-SetupMsal
-    Invoke-SetupSignIn -Choice $SignIn -GivenTenantId $TenantId -GivenClientId $ClientId
+    Invoke-SetupSignIn -Choice $SignIn
     if (-not $SkipWebhook) { Invoke-SetupWebhook }
     Invoke-SetupShortcuts
 
@@ -659,6 +563,6 @@ function Invoke-Setup {
 }
 
 if ($MyInvocation.InvocationName -ne ".") {
-    $outcome = Invoke-Setup -SignIn $SignIn -TenantId $TenantId -ClientId $ClientId -SkipWebhook:$SkipWebhook -NoLaunch:$NoLaunch -CheckOnly:$CheckOnly
+    $outcome = Invoke-Setup -SignIn $SignIn -SkipWebhook:$SkipWebhook -NoLaunch:$NoLaunch -CheckOnly:$CheckOnly
     if ($outcome.Ready) { exit 0 } else { exit 2 }
 }
