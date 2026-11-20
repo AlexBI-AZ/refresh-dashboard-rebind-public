@@ -84,6 +84,33 @@ run instead (`1` = the most recent). A usable run has a successful refresh, a po
 without query errors, and no FAIL verdict. A FAIL run becomes usable after someone
 accepts it by creating an empty `accepted.json` in its run folder.
 
+### Deployments and baselines
+
+The default before snapshot is taken immediately before the refresh, so it already
+includes any deployment made earlier. Two consequences matter after a model deployment:
+
+- The structure section compares this refresh with itself. Tables, columns, measures and
+  relationships changed by the deployment are not reported; only changes made by the
+  refresh appear.
+- The before values are whatever the deployed model holds. An in-place definition update
+  keeps the data of tables that still exist, so these values are usually real production
+  figures, not zeros; new tables start empty and removed tables are gone. An empty before
+  snapshot is not an error either: a month or a table without a previous value counts as
+  new and passes, and a missing previous date passes.
+
+To measure what a deployment changed, make the first refresh after it compare against a
+run from before it:
+
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Start-ValidatedRefresh.ps1 -Report example -Recipients you@example.com -BaselineRunsBack 1
+
+`N` counts usable runs back from the newest, excluding the current one, and the email
+names the run it used. A usable run needs a successful refresh, a post-check without
+query errors and no FAIL verdict, or an `accepted.json`. A `-SkipRefresh` pre-check made
+before the deployment is a useful record of that state, but it is not a usable baseline,
+and there is no option yet to pass a snapshot file directly. If no earlier usable run
+exists, note the deployment date and model change in the run notes: the first refresh
+after a deployment can only report what the refresh itself changed.
+
 ## Requirements
 
 Same as the Control Panel's Refresh tab: Windows PowerShell 5.1, MSAL.PS, the
