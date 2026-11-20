@@ -59,6 +59,15 @@ try {
 # Read-only lookups behind the Refresh tab's name pickers (workspaces, reports, semantic
 # models, dataflows, lineage). Same engine as the runner; see Invoke-CatalogRequest.
 . (Join-Path $scriptDir "runtime\refresh-catalog.ps1")
+# Rebind: request and profile validation, the operation lock, Scan/Apply workers and
+# their status. Each Scan or Apply runs runtime\Invoke-RebindRun.ps1 in its own process.
+. (Join-Path $scriptDir "runtime\rebind-core.ps1")
+$rebindPaths = @{
+    StatusFile = $rebindStatusFile
+    LockFile = Join-Path $scriptDir "rebind.lock"
+    RunnerPath = Join-Path $scriptDir "runtime\Invoke-RebindRun.ps1"
+    ErrorLogPath = Join-Path $logsDir "rebind-worker-errors.log"
+}
 $global:catalogWorkspaceCache = $null
 $global:cachedToken = $null
 $global:cachedTokenAt = $null
@@ -436,111 +445,6 @@ function Test-RefreshWorkerAlive {
     try { return $process.StartTime.ToString("o") -eq [string]$worker.startTime } catch { return $true }
 }
 
-function Get-RebindRequest {
-    param($Body)
-
-    $rawPath = [string]$Body.ReportPath
-    if ([string]::IsNullOrWhiteSpace($rawPath)) {
-        return [pscustomobject]@{ Ok = $false; Error = "Report folder path is required" }
-    }
-
-    try {
-        $resolvedPath = (Resolve-Path -LiteralPath $rawPath -ErrorAction Stop).Path
-    } catch {
-        return [pscustomobject]@{ Ok = $false; Error = "Report path does not exist: $rawPath" }
-    }
-    if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) {
-        return [pscustomobject]@{ Ok = $false; Error = "Report path is not a folder: $rawPath" }
-    }
-
-    $hasPbip = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.pbip" -File -ErrorAction SilentlyContinue).Count -gt 0
-    $hasReport = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.Report" -Directory -ErrorAction SilentlyContinue).Count -gt 0
-    $hasModel = @(Get-ChildItem -LiteralPath $resolvedPath -Filter "*.SemanticModel" -Directory -ErrorAction SilentlyContinue).Count -gt 0
-    if (-not ($hasPbip -or $hasReport -or $hasModel)) {
-        return [pscustomobject]@{ Ok = $false; Error = "The selected folder does not look like a PBIP project (no .pbip, .Report, or .SemanticModel item found)" }
-    }
-
-    $rawMappings = @($Body.Mappings)
-    if ($rawMappings.Count -eq 0) {
-        return [pscustomobject]@{ Ok = $false; Error = "At least one GUID mapping is required" }
-    }
-
-    $allowedTypes = @("Workspace", "Dataflow", "Dataset")
-    $normalized = @()
-    $oldGuids = @{}
-    foreach ($mapping in $rawMappings) {
-        $type = [string]$mapping.Type
-        $oldText = ([string]$mapping.OldGuid).Trim()
-        $newText = ([string]$mapping.NewGuid).Trim()
-        $oldGuid = [Guid]::Empty
-        $newGuid = [Guid]::Empty
-
-        if ($allowedTypes -notcontains $type) {
-            return [pscustomobject]@{ Ok = $false; Error = "Unsupported mapping type: $type" }
-        }
-        if (-not [Guid]::TryParse($oldText, [ref]$oldGuid) -or -not [Guid]::TryParse($newText, [ref]$newGuid)) {
-            return [pscustomobject]@{ Ok = $false; Error = "Every mapping must contain a valid old and new GUID" }
-        }
-
-        $oldValue = $oldGuid.ToString().ToLowerInvariant()
-        $newValue = $newGuid.ToString().ToLowerInvariant()
-        if ($oldValue -eq $newValue) {
-            return [pscustomobject]@{ Ok = $false; Error = "$type mapping has the same old and new GUID" }
-        }
-        if ($oldGuids.ContainsKey($oldValue)) {
-            return [pscustomobject]@{ Ok = $false; Error = "Old GUID is mapped more than once: $oldValue" }
-        }
-
-        $oldGuids[$oldValue] = $true
-        $normalized += [pscustomobject]@{ Type = $type; OldGuid = $oldValue; NewGuid = $newValue }
-    }
-
-    foreach ($mapping in $normalized) {
-        if ($oldGuids.ContainsKey($mapping.NewGuid)) {
-            return [pscustomobject]@{ Ok = $false; Error = "A new GUID is also used as an old GUID. Chained mappings are unsafe; split them into separate rebind runs." }
-        }
-    }
-
-    $signatureParts = @($normalized | ForEach-Object { "$($_.Type)|$($_.OldGuid)|$($_.NewGuid)" } | Sort-Object)
-    $signatureInput = $resolvedPath.ToLowerInvariant() + "`n" + ($signatureParts -join "`n")
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $signatureBytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($signatureInput))
-        $signature = ([BitConverter]::ToString($signatureBytes)).Replace("-", "").ToLowerInvariant()
-    } finally {
-        $sha.Dispose()
-    }
-
-    return [pscustomobject]@{
-        Ok = $true
-        Error = ""
-        ReportPath = $resolvedPath
-        Mappings = $normalized
-        Signature = $signature
-    }
-}
-
-function ConvertTo-Base64Json($Data) {
-    $json = $Data | ConvertTo-Json -Depth 10 -Compress
-    return [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($json))
-}
-
-function Get-RebindState {
-    if (-not (Test-Path -LiteralPath $rebindStatusFile)) { return $null }
-    try { return Get-Content -LiteralPath $rebindStatusFile -Raw | ConvertFrom-Json } catch { return $null }
-}
-
-function Set-RebindFailure($Message) {
-    $state = Get-RebindState
-    if (-not $state) {
-        $state = [pscustomobject]@{ phase = "failed"; running = $false; error = ""; logs = @(); scanResults = $null; applyResults = $null }
-    }
-    $state.phase = "failed"
-    $state.running = $false
-    $state.error = $Message
-    $state | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $rebindStatusFile
-}
-
 # ============================================================
 # App window (Edge --app mode)
 # ============================================================
@@ -637,7 +541,14 @@ if ($AppWindow) {
 
 # Clear stale status files
 @{ running = $false; result = ""; logs = @(); dataflowStatus = ""; datasetStatus = ""; dataflowDetails = @(); semanticModelDetails = @(); emailStatus = ""; emailWarning = ""; error = "" } | ConvertTo-Json -Depth 10 | Set-Content $statusFile
-@{ phase = "idle"; running = $false; error = ""; logs = @() } | ConvertTo-Json -Depth 10 | Set-Content $rebindStatusFile
+# Rebind status is reconciled, not reset: a worker that still runs keeps its lock and status.
+try {
+    $rebindStartup = Initialize-RebindStatus -Paths $rebindPaths
+    if ($rebindStartup -eq "WorkerActive") { Write-Host "A Rebind operation is still running; its status was kept." -ForegroundColor Yellow }
+    elseif ($rebindStartup -eq "Interrupted") { Write-Host "The previous Rebind operation stopped before finishing; it is marked as interrupted." -ForegroundColor Yellow }
+} catch {
+    Write-Host "Rebind status could not be checked: $(Get-RebindSafeText $_.Exception.Message)" -ForegroundColor Yellow
+}
 if (-not (Test-Path -LiteralPath $partitionRefreshStatusFile)) {
     @{ running = $false; requestId = ""; status = ""; extendedStatus = ""; logs = @(); partitions = @() } |
         ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $partitionRefreshStatusFile
@@ -1009,25 +920,30 @@ while ($listener.IsListening) {
             # ============================================================
             "^/api/rebind-profiles$" {
                 if ($method -eq "GET") {
-                    $profiles = if ((Test-Path $rebindProfilesFile) -and (Get-Item $rebindProfilesFile).Length -gt 0) {
-                        try { @(Get-Content $rebindProfilesFile -Raw -Encoding UTF8 | ConvertFrom-Json) } catch { @() }
-                    } else { @() }
-                    $items = @($profiles)
-                    $json = "["
-                    for ($i = 0; $i -lt $items.Count; $i++) {
-                        if ($i -gt 0) { $json += "," }
-                        $json += ($items[$i] | ConvertTo-Json -Depth 10 -Compress)
+                    $saved = Read-RebindProfileFile -Path $rebindProfilesFile
+                    if (-not $saved.Ok) {
+                        $response.StatusCode = 500
+                        Send-Json $response @{ ok = $false; error = $saved.Error }
+                        continue
                     }
-                    $json += "]"
-                    $buf = [System.Text.Encoding]::UTF8.GetBytes($json)
+                    $buf = [System.Text.Encoding]::UTF8.GetBytes($saved.Json)
                     $response.ContentType = "application/json; charset=utf-8"
                     $response.ContentLength64 = $buf.Length
                     $response.OutputStream.Write($buf, 0, $buf.Length)
                 } elseif ($method -eq "POST") {
-                    $reader = New-Object System.IO.StreamReader($request.InputStream)
-                    $json = $reader.ReadToEnd(); $reader.Close()
-                    [System.IO.File]::WriteAllText($rebindProfilesFile, $json, (New-Object System.Text.UTF8Encoding $true))
-                    Send-Json $response @{ ok = $true }
+                    # The whole collection is validated before the saved file is replaced.
+                    $bodyText = Read-RebindRequestText -Stream $request.InputStream -DeclaredLength $request.ContentLength64
+                    if (-not $bodyText.Ok) {
+                        $response.StatusCode = $bodyText.StatusCode
+                        Send-Json $response @{ ok = $false; error = $bodyText.Error }
+                        continue
+                    }
+                    $saveResult = Save-RebindProfileFile -Path $rebindProfilesFile -Json $bodyText.Text
+                    $response.StatusCode = $saveResult.StatusCode
+                    Send-Json $response $saveResult.Body
+                } else {
+                    $response.StatusCode = 405
+                    Send-Json $response @{ ok = $false; error = "Method not allowed" }
                 }
             }
 
@@ -1052,510 +968,52 @@ while ($listener.IsListening) {
             }
 
             # ============================================================
-            # REBIND -- Scan (Phase 1)
+            # REBIND -- Scan (Phase 1) and Apply (Phase 2 + 3)
             # ============================================================
-            "^/api/rebind/scan$" {
-                if ($method -ne "POST") { $response.StatusCode = 405; continue }
-
-                $reader = New-Object System.IO.StreamReader($request.InputStream)
-                $body = $reader.ReadToEnd() | ConvertFrom-Json; $reader.Close()
-
-                $requestData = Get-RebindRequest $body
-                if (-not $requestData.Ok) {
-                    Send-Json $response @{ ok = $false; error = $requestData.Error }
+            # A malformed or refused request returns an error and leaves the status of
+            # any running operation alone; only the worker that owns the lock writes it.
+            "^/api/rebind/(scan|apply)$" {
+                if ($method -ne "POST") { $response.StatusCode = 405; Send-Json $response @{ ok = $false; error = "Method not allowed" }; continue }
+                $bodyText = Read-RebindRequestText -Stream $request.InputStream -DeclaredLength $request.ContentLength64
+                if (-not $bodyText.Ok) {
+                    $response.StatusCode = $bodyText.StatusCode
+                    Send-Json $response @{ ok = $false; error = $bodyText.Error }
                     continue
                 }
-
-                $currentState = Get-RebindState
-                if ($currentState -and $currentState.running) {
-                    Send-Json $response @{ ok = $false; error = "Another rebind operation is already running" }
+                $parsed = ConvertFrom-RebindRequestJson -Text $bodyText.Text
+                if (-not $parsed.Ok) {
+                    $response.StatusCode = 400
+                    Send-Json $response @{ ok = $false; error = $parsed.Error }
                     continue
                 }
-
-                $reportPath = $requestData.ReportPath
-                $payloadBase64 = ConvertTo-Base64Json @{
-                    ReportPath = $reportPath
-                    StatusFile = $rebindStatusFile
-                    LogsDir = $logsDir
-                    Mappings = @($requestData.Mappings)
-                    RequestSignature = $requestData.Signature
-                }
-
-                @{ phase = "starting_scan"; running = $true; error = ""; logs = @(); scanResults = $null; applyResults = $null; requestSignature = $requestData.Signature } |
-                    ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $rebindStatusFile
-
-                # Generate scan worker with FIXED file enumeration (no broken -Include)
-                $rebindWorker = @"
-`$ErrorActionPreference = "Stop"
-`$payload = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("$payloadBase64")) | ConvertFrom-Json
-`$reportPath = `$payload.ReportPath
-`$rebindStatusFile = `$payload.StatusFile
-`$logsDir = `$payload.LogsDir
-`$mappings = @(`$payload.Mappings)
-`$requestSignature = `$payload.RequestSignature
-
-function Log(`$msg) {
-    try {
-        `$s = Get-Content `$rebindStatusFile -Raw | ConvertFrom-Json
-        `$s.logs += @{ time = (Get-Date -Format "HH:mm:ss"); text = `$msg }
-        `$s | ConvertTo-Json -Depth 10 -Compress | Set-Content `$rebindStatusFile
-    } catch { }
-}
-
-function SetPhase(`$phase) {
-    try {
-        `$s = Get-Content `$rebindStatusFile -Raw | ConvertFrom-Json
-        `$s.phase = `$phase
-        `$s.running = (`$phase -ne 'scan_done' -and `$phase -ne 'done' -and `$phase -ne 'failed')
-        `$s | ConvertTo-Json -Depth 10 -Compress | Set-Content `$rebindStatusFile
-    } catch { }
-}
-
-function Write-ScanResults(`$results) {
-    try {
-        `$s = Get-Content `$rebindStatusFile -Raw | ConvertFrom-Json
-        `$s.scanResults = `$results
-        `$s | ConvertTo-Json -Depth 10 -Compress | Set-Content `$rebindStatusFile
-    } catch { }
-}
-
-try {
-    # Initialize
-    @{ phase = "scanning"; running = `$true; error = ""; logs = @(); scanResults = `$null; applyResults = `$null; requestSignature = `$requestSignature } | ConvertTo-Json -Depth 10 | Set-Content `$rebindStatusFile
-    Log "=== SCAN ==="
-    Log "Path: `$reportPath"
-    Log "Mappings: `$(`$mappings.Count)"
-
-    # Confirm PBIP structure
-    `$hasReport = Test-Path (Join-Path `$reportPath "*.Report")
-    `$hasModel = Test-Path (Join-Path `$reportPath "*.SemanticModel")
-    `$hasPbip = (Get-ChildItem `$reportPath -Filter "*.pbip" -File).Count -gt 0
-    Log "PBIP structure: Report=`$hasReport, SemanticModel=`$hasModel, .pbip=`$hasPbip"
-
-    # Find all target files (skip .pbi/ cache, skip generated files)
-    # Using -File + Where-Object extension filter instead of -Include (broken in PS 5.1 with -Recurse)
-    `$allFiles = Get-ChildItem -Path `$reportPath -Recurse -File |
-        Where-Object { (`$_.Extension -eq '.tmdl' -or `$_.Extension -eq '.json') -and `$_.FullName -notmatch '\\\.pbi[\\/]' -and `$_.FullName -notmatch '\\cache\.abf`$' -and `$_.DirectoryName -notmatch '\\\.pbi`$' }
-
-    Log "Target files found: `$(`$allFiles.Count)"
-    if (-not `$allFiles) { `$allFiles = @() }
-
-    `$scanMappings = @()
-    `$newGuidPresence = @()
-    `$scannedFiles = @()
-
-    foreach (`$m in `$mappings) {
-        `$oldGuid = `$m.OldGuid
-        `$newGuid = `$m.NewGuid
-        `$mappingType = `$m.Type
-
-        Log "---"
-        Log "Scan `${mappingType}`: `$(`$oldGuid.Substring(0,8))..."
-
-        `$occurrences = @()
-        `$totalCount = 0
-
-        foreach (`$file in `$allFiles) {
-            `$matches = Select-String -Path `$file.FullName -Pattern ([regex]::Escape(`$oldGuid)) -CaseSensitive:`$false -AllMatches
-            if (`$matches) {
-                `$count = 0
-                `$contextLines = @()
-                foreach (`$match in `$matches) {
-                    `$count += `$match.Matches.Count
-                    # Capture context (2 lines of context)
-                    `$relPath = `$file.FullName.Substring(`$reportPath.Length).TrimStart('\','/')
-                    `$ctx = "`${relPath}`:`$(`$match.LineNumber): `$(`$match.Line.Trim())"
-                    if (`$contextLines.Count -lt 2) { `$contextLines += `$ctx }
-                }
-                `$totalCount += `$count
-                `$occurrences += @{
-                    file = `$file.FullName.Substring(`$reportPath.Length).TrimStart('\','/')
-                    count = `$count
-                    context = `$contextLines
-                }
-                if (`$scannedFiles -notcontains `$file.FullName) { `$scannedFiles += `$file.FullName }
-            }
-        }
-
-        Log "  `$totalCount hit(s) in `$(`$occurrences.Count) file(s)"
-
-        # Show per-file breakdown
-        foreach (`$occ in `$occurrences) {
-            Log "  `$(`$occ.file): `$(`$occ.count) hit(s)"
-            foreach (`$ctx in `$occ.context) {
-                Log "    `$ctx"
-            }
-        }
-
-        # Check for new GUID already present
-        `$newMatches = if (`$allFiles.Count -gt 0) {
-            @(Select-String -Path `$allFiles.FullName -Pattern ([regex]::Escape(`$newGuid)) -CaseSensitive:`$false -List)
-        } else { @() }
-        if (`$newMatches) {
-            Log "  WARN: new GUID `$(`$newGuid.Substring(0,8))... already in:"
-            foreach (`$nm in `$newMatches) {
-                `$relP = `$nm.Path.Substring(`$reportPath.Length).TrimStart('\','/')
-                Log "    `${relP}`:`$(`$nm.LineNumber): `$(`$nm.Line.Trim())"
-                `$newGuidPresence += @{ guid = `$newGuid; file = `$relP; line = `$nm.LineNumber }
-            }
-        }
-
-        `$scanMappings += @{
-            type = `$mappingType
-            oldGuid = `$oldGuid
-            newGuid = `$newGuid
-            totalOccurrences = `$totalCount
-            occurrences = `$occurrences
-            ambiguous = @()
-        }
-    }
-
-    # Check for ambiguous GUIDs (appearing in unexpected contexts)
-    Log "---"
-    Log "Ambiguity check..."
-    # Ambiguous: GUIDs that appear in files that aren't .tmdl or report JSON
-    foreach (`$m in `$scanMappings) {
-        foreach (`$occ in `$m.occurrences) {
-            `$ext = [System.IO.Path]::GetExtension(`$occ.file).ToLower()
-            if (`$ext -eq '.json' -and `$occ.file -notmatch 'Report') {
-                Log "  WARN: `$(`$m.oldGuid.Substring(0,8))... in non-Report JSON: `$(`$occ.file)"
-                `$m.ambiguous += @{ file = `$occ.file; reason = "Non-report JSON file" }
-            }
-        }
-    }
-
-    `$results = @{
-        mappings = `$scanMappings
-        newGuidPresence = `$newGuidPresence
-        scannedFiles = (`$scannedFiles | ForEach-Object { `$_.Substring(`$reportPath.Length).TrimStart('\','/') })
-        targetFileCount = `$allFiles.Count
-        matchedFileCount = `$scannedFiles.Count
-    }
-
-    Write-ScanResults `$results
-
-    Log "---"
-    Log "SCAN DONE: `$(`$scanMappings.Count) mapping(s), `$(`$scannedFiles.Count) file(s)"
-    Log "Total hits: `$(`$(`$scanMappings | ForEach-Object { `$_.totalOccurrences } | Measure-Object -Sum).Sum)"
-
-    if (`$newGuidPresence.Count -gt 0) {
-        Log "WARN: `$(`$newGuidPresence.Count) new GUID(s) already present"
-    }
-
-    Log "=== Review scan results, then click Apply to proceed ==="
-    SetPhase "scan_done"
-
-} catch {
-    Log "ERROR during scan: `$_"
-    try {
-        `$s = Get-Content `$rebindStatusFile -Raw | ConvertFrom-Json
-        `$s.error = `$_.Exception.Message
-        `$s.phase = "failed"
-        `$s.running = `$false
-        `$s | ConvertTo-Json -Depth 10 -Compress | Set-Content `$rebindStatusFile
-    } catch { }
-}
-"@
-                $rebindWorkerPath = Join-Path $scriptDir "_rebind-worker.ps1"
-                [System.IO.File]::WriteAllText($rebindWorkerPath, $rebindWorker, (New-Object System.Text.UTF8Encoding $true))
-
-                if (-not (Test-Path $rebindWorkerPath)) {
-                    Set-RebindFailure "Failed to write scan worker"
-                    Send-Json $response @{ ok = $false; error = "Failed to write scan worker" }
-                    continue
-                }
-
-                $errorLog = Join-Path $logsDir "rebind-worker-errors.log"
-                $psi = New-Object System.Diagnostics.ProcessStartInfo
-                $psi.FileName = "powershell.exe"
-                $psi.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$rebindWorkerPath`" 2>`"$errorLog`""
-                $psi.CreateNoWindow = $true
-                $psi.UseShellExecute = $false
-                $proc = [System.Diagnostics.Process]::Start($psi)
-                if (-not $proc) {
-                    Set-RebindFailure "Failed to start scan worker"
-                    Send-Json $response @{ ok = $false; error = "Failed to start scan worker" }
-                    continue
-                }
-
-                Send-Json $response @{ ok = $true }
+                $rebindMode = if ($path -eq "/api/rebind/apply") { "Apply" } else { "Scan" }
+                $startResult = Start-RebindOperation -Mode $rebindMode -Body $parsed.Value -Paths $rebindPaths
+                $response.StatusCode = $startResult.StatusCode
+                Send-Json $response $startResult.Body
             }
 
             # ============================================================
-            # REBIND -- Apply (Phase 2 + 3)
-            # ============================================================
-            "^/api/rebind/apply$" {
-                if ($method -ne "POST") { $response.StatusCode = 405; continue }
-
-                $reader = New-Object System.IO.StreamReader($request.InputStream)
-                $body = $reader.ReadToEnd() | ConvertFrom-Json; $reader.Close()
-
-                $requestData = Get-RebindRequest $body
-                if (-not $requestData.Ok) {
-                    Send-Json $response @{ ok = $false; error = $requestData.Error }
-                    continue
-                }
-
-                $currentState = Get-RebindState
-                if (-not $currentState -or $currentState.running -or $currentState.phase -ne "scan_done") {
-                    Send-Json $response @{ ok = $false; error = "Run Scan and review its summary before applying changes" }
-                    continue
-                }
-                if ($currentState.requestSignature -ne $requestData.Signature) {
-                    Send-Json $response @{ ok = $false; error = "The path or mappings changed after Scan. Run Scan again before applying." }
-                    continue
-                }
-
-                $scanMappings = @($currentState.scanResults.mappings)
-                $scanHits = ($scanMappings | ForEach-Object { [int]$_.totalOccurrences } | Measure-Object -Sum).Sum
-                if (-not $scanHits -or $scanHits -le 0) {
-                    Send-Json $response @{ ok = $false; error = "Scan found no old GUID occurrences, so there is nothing to apply" }
-                    continue
-                }
-
-                $reportPath = $requestData.ReportPath
-                $payloadBase64 = ConvertTo-Base64Json @{
-                    ReportPath = $reportPath
-                    StatusFile = $rebindStatusFile
-                    LogsDir = $logsDir
-                    Mappings = @($requestData.Mappings)
-                    RequestSignature = $requestData.Signature
-                }
-
-                @{ phase = "starting_apply"; running = $true; error = ""; logs = @(); scanResults = $currentState.scanResults; applyResults = $null; requestSignature = $requestData.Signature } |
-                    ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $rebindStatusFile
-
-                # Generate apply worker (Phase 2: replace + Phase 3: verify)
-                $rebindWorker = @"
-`$ErrorActionPreference = "Stop"
-`$payload = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String("$payloadBase64")) | ConvertFrom-Json
-`$reportPath = `$payload.ReportPath
-`$rebindStatusFile = `$payload.StatusFile
-`$logsDir = `$payload.LogsDir
-`$mappings = @(`$payload.Mappings)
-`$requestSignature = `$payload.RequestSignature
-
-function Log(`$msg) {
-    try {
-        `$s = Get-Content `$rebindStatusFile -Raw | ConvertFrom-Json
-        `$s.logs += @{ time = (Get-Date -Format "HH:mm:ss"); text = `$msg }
-        `$s | ConvertTo-Json -Depth 10 -Compress | Set-Content `$rebindStatusFile
-    } catch { }
-}
-
-function SetPhase(`$phase) {
-    try {
-        `$s = Get-Content `$rebindStatusFile -Raw | ConvertFrom-Json
-        `$s.phase = `$phase
-        `$s.running = (`$phase -ne 'done' -and `$phase -ne 'failed')
-        `$s | ConvertTo-Json -Depth 10 -Compress | Set-Content `$rebindStatusFile
-    } catch { }
-}
-
-function Write-ApplyResults(`$results) {
-    try {
-        `$s = Get-Content `$rebindStatusFile -Raw | ConvertFrom-Json
-        `$s.applyResults = `$results
-        `$s | ConvertTo-Json -Depth 10 -Compress | Set-Content `$rebindStatusFile
-    } catch { }
-}
-
-try {
-    @{ phase = "replacing"; running = `$true; error = ""; logs = @(); scanResults = `$null; applyResults = `$null; requestSignature = `$requestSignature } | ConvertTo-Json -Depth 10 | Set-Content `$rebindStatusFile
-    Log "=== REPLACE ==="
-    Log "Path: `$reportPath"
-    Log "Mappings: `$(`$mappings.Count)"
-
-    # Collect all target files
-    `$allFiles = Get-ChildItem -Path `$reportPath -Recurse -File |
-        Where-Object { (`$_.Extension -eq '.tmdl' -or `$_.Extension -eq '.json') -and `$_.FullName -notmatch '\\\.pbi[\\/]' -and `$_.FullName -notmatch '\\cache\.abf`$' -and `$_.DirectoryName -notmatch '\\\.pbi`$' }
-    if (-not `$allFiles) { `$allFiles = @() }
-
-    `$filesChanged = @()
-    `$totalReplacements = 0
-    `$mappingResults = @()
-
-    # Process one mapping at a time to avoid cross-contamination
-    foreach (`$m in `$mappings) {
-        `$oldGuid = `$m.OldGuid
-        `$newGuid = `$m.NewGuid
-        `$mappingType = `$m.Type
-
-        Log "---"
-        Log "Replace `${mappingType}`: `$(`$oldGuid.Substring(0,8))... -> `$(`$newGuid.Substring(0,8))..."
-
-        `$mappingReplacements = 0
-
-        foreach (`$file in `$allFiles) {
-            try {
-                `$content = [System.IO.File]::ReadAllText(`$file.FullName)
-                `$replaced = [regex]::Replace(`$content, [regex]::Escape(`$oldGuid), `$newGuid, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-
-                if (`$replaced -ne `$content) {
-                    `$relPath = `$file.FullName.Substring(`$reportPath.Length).TrimStart('\','/')
-                    # Count replacements
-                    `$diff = ([regex]::Matches(`$content, [regex]::Escape(`$oldGuid), [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)).Count
-                    `$mappingReplacements += `$diff
-
-                    # Write replaced content
-                    [System.IO.File]::WriteAllText(`$file.FullName, `$replaced)
-
-                    Log "  `${relPath}`: `$diff"
-                    if (`$filesChanged -notcontains `$relPath) { `$filesChanged += `$relPath }
-                }
-            } catch {
-                Log "  ERROR processing `$(`$file.Name): `$_"
-            }
-        }
-
-        Log "  `$mappingType total: `$mappingReplacements"
-        `$totalReplacements += `$mappingReplacements
-        `$mappingResults += @{
-            type = `$mappingType
-            oldGuid = `$oldGuid
-            newGuid = `$newGuid
-            replacements = `$mappingReplacements
-        }
-    }
-
-    Log "---"
-    Log "Total: `$totalReplacements replacement(s)"
-
-    # ============================================================
-    # PHASE 3: Verification
-    # ============================================================
-    SetPhase "verifying"
-    Log "=== VERIFY ==="
-
-    `$verificationOk = `$true
-    `$oldGuidsRemaining = @{}
-    `$newGuidCounts = @{}
-
-    # Re-read file list
-    `$allFiles = Get-ChildItem -Path `$reportPath -Recurse -File |
-        Where-Object { (`$_.Extension -eq '.tmdl' -or `$_.Extension -eq '.json') -and `$_.FullName -notmatch '\\\.pbi[\\/]' -and `$_.FullName -notmatch '\\cache\.abf`$' -and `$_.DirectoryName -notmatch '\\\.pbi`$' }
-    if (-not `$allFiles) { `$allFiles = @() }
-
-    foreach (`$m in `$mappings) {
-        `$oldGuid = `$m.OldGuid
-        `$newGuid = `$m.NewGuid
-        `$mappingType = `$m.Type
-
-        # Check old GUIDs: must be zero
-        `$remaining = if (`$allFiles.Count -gt 0) {
-            @(Select-String -Path `$allFiles.FullName -Pattern ([regex]::Escape(`$oldGuid)) -CaseSensitive:`$false -List)
-        } else { @() }
-        if (`$remaining) {
-            `$verificationOk = `$false
-            Log "FAIL: `$mappingType `$(`$oldGuid.Substring(0,8))... still present:"
-            `$oldGuidsRemaining[`$oldGuid] = @()
-            foreach (`$r in `$remaining) {
-                `$relP = `$r.Path.Substring(`$reportPath.Length).TrimStart('\','/')
-                Log "  `${relP}`:`$(`$r.LineNumber): `$(`$r.Line.Trim())"
-                `$oldGuidsRemaining[`$oldGuid] += @{ file = `$relP; line = `$r.LineNumber }
-            }
-        } else {
-            Log "OK: `$mappingType `$(`$oldGuid.Substring(0,8))... removed"
-        }
-
-        # Check new GUIDs: count should match replacements
-        `$newMatches = if (`$allFiles.Count -gt 0) {
-            @(Select-String -Path `$allFiles.FullName -Pattern ([regex]::Escape(`$newGuid)) -CaseSensitive:`$false -AllMatches)
-        } else { @() }
-        `$newCount = 0
-        foreach (`$nm in `$newMatches) { `$newCount += `$nm.Matches.Count }
-        `$newGuidCounts[`$newGuid] = `$newCount
-        Log "  New: `$(`$newGuid.Substring(0,8))... = `$newCount"
-    }
-
-    `$applyResults = @{
-        filesChanged = `$filesChanged
-        totalReplacements = `$totalReplacements
-        mappings = `$mappingResults
-        verification = @{
-            ok = `$verificationOk
-            oldGuidsRemaining = `$oldGuidsRemaining
-            newGuidCounts = `$newGuidCounts
-        }
-    }
-
-    Write-ApplyResults `$applyResults
-
-    if (`$verificationOk) {
-        Log "=== PASS ==="
-        Log "All old GUIDs removed. New GUID counts confirmed."
-        Log "Files changed: `$(`$filesChanged.Count)"
-        Log "Total replacements: `$totalReplacements"
-        Log "DONE: PBIP rebind complete."
-        Log "IMPORTANT: Open report in Power BI Desktop to confirm connectivity."
-        SetPhase "done"
-    } else {
-        Log "=== FAILED ==="
-        Log "Some old GUIDs remain. Check the log above for details."
-        SetPhase "failed"
-    }
-
-} catch {
-    Log "ERROR during apply: `$_"
-    try {
-        `$s = Get-Content `$rebindStatusFile -Raw | ConvertFrom-Json
-        `$s.error = `$_.Exception.Message
-        `$s.phase = "failed"
-        `$s.running = `$false
-        `$s | ConvertTo-Json -Depth 10 -Compress | Set-Content `$rebindStatusFile
-    } catch { }
-}
-"@
-                $rebindWorkerPath = Join-Path $scriptDir "_rebind-worker.ps1"
-                [System.IO.File]::WriteAllText($rebindWorkerPath, $rebindWorker, (New-Object System.Text.UTF8Encoding $true))
-
-                if (-not (Test-Path $rebindWorkerPath)) {
-                    Set-RebindFailure "Failed to write apply worker"
-                    Send-Json $response @{ ok = $false; error = "Failed to write apply worker" }
-                    continue
-                }
-
-                $errorLog = Join-Path $logsDir "rebind-worker-errors.log"
-                $psi = New-Object System.Diagnostics.ProcessStartInfo
-                $psi.FileName = "powershell.exe"
-                $psi.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -File `"$rebindWorkerPath`" 2>`"$errorLog`""
-                $psi.CreateNoWindow = $true
-                $psi.UseShellExecute = $false
-                $proc = [System.Diagnostics.Process]::Start($psi)
-                if (-not $proc) {
-                    Set-RebindFailure "Failed to start apply worker"
-                    Send-Json $response @{ ok = $false; error = "Failed to start apply worker" }
-                    continue
-                }
-
-                Send-Json $response @{ ok = $true }
-            }
-
-            # ============================================================
-            # REBIND -- Status
+            # REBIND -- Cancel and status
             # ============================================================
             "^/api/rebind/cancel$" {
-                if ($method -ne "POST") { $response.StatusCode = 405; continue }
-                $state = Get-RebindState
-                if ($state -and $state.running) {
-                    Send-Json $response @{ ok = $false; error = "A rebind operation is still running" }
+                if ($method -ne "POST") { $response.StatusCode = 405; Send-Json $response @{ ok = $false; error = "Method not allowed" }; continue }
+                $bodyText = Read-RebindRequestText -Stream $request.InputStream -DeclaredLength $request.ContentLength64
+                $parsed = if ($bodyText.Ok) { ConvertFrom-RebindRequestJson -Text $bodyText.Text -AllowEmpty } else { $null }
+                if (-not $bodyText.Ok -or -not $parsed.Ok) {
+                    $response.StatusCode = $(if (-not $bodyText.Ok) { $bodyText.StatusCode } else { 400 })
+                    Send-Json $response @{ ok = $false; invalidated = $false; error = $(if (-not $bodyText.Ok) { $bodyText.Error } else { $parsed.Error }) }
                     continue
                 }
-                if ($state) {
-                    $state.phase = "cancelled"
-                    $state.running = $false
-                    $state.requestSignature = ""
-                    $state | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $rebindStatusFile
-                }
-                Send-Json $response @{ ok = $true }
+                $cancelOperationId = if ($parsed.Value) { [string]$parsed.Value.OperationId } else { "" }
+                $cancelResult = Invoke-RebindCancel -Paths $rebindPaths -OperationId $cancelOperationId
+                $response.StatusCode = $cancelResult.StatusCode
+                Send-Json $response $cancelResult.Body
             }
             "^/api/rebind/status$" {
-                if (Test-Path $rebindStatusFile) {
-                    $s = Get-Content $rebindStatusFile -Raw | ConvertFrom-Json
-                    Send-Json $response $s
-                } else {
-                    Send-Json $response @{ phase = "idle"; running = $false; error = ""; logs = @() }
-                }
+                if ($method -ne "GET") { $response.StatusCode = 405; Send-Json $response @{ ok = $false; error = "Method not allowed" }; continue }
+                $statusResult = Get-RebindStatusResponse -Paths $rebindPaths
+                $response.StatusCode = $statusResult.StatusCode
+                Send-Json $response $statusResult.Body
             }
 
             default {
@@ -1563,8 +1021,8 @@ try {
             }
         }
     } catch {
+        # Never touches Rebind status: only the operation that holds rebind.lock writes it.
         $response.StatusCode = 500
-        if ($path -match '^/api/rebind/(scan|apply)$') { Set-RebindFailure $_.Exception.Message }
         try { Send-Json $response @{ ok = $false; error = $_.Exception.Message } } catch { }
     } finally {
         $response.Close()

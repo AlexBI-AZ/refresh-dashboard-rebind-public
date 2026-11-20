@@ -1067,7 +1067,13 @@ let scanComplete = false;
 let rebindPolling = null;
 let rebindBusy = false;
 let rebindProfiles = [];
+let rebindProfilesLoadError = '';
 let selectedRebindId = null;
+// Mapping row IDs are generated here and never read from saved profiles or storage.
+let nextMappingRowId = 1;
+// Server operation IDs: the running Scan/Apply being polled, and the Scan being reviewed.
+let rebindOperationId = '';
+let scanOperationId = '';
 let partitionRefreshProfiles = [];
 let selectedPartitionRefreshId = null;
 let partitionRefreshPolling = null;
@@ -1105,7 +1111,7 @@ async function init() {
   // Restore rebind state
   const savedMappings = localStorage.getItem('rebind-mappings');
   if (savedMappings) {
-    try { mappings = JSON.parse(savedMappings); } catch(e) { mappings = []; }
+    try { mappings = normalizeMappingRows(JSON.parse(savedMappings)); } catch(e) { mappings = []; }
   }
   if (mappings.length === 0) { addMapping(); addMapping(); }
   const savedPath = localStorage.getItem('rebind-path');
@@ -2141,18 +2147,68 @@ function renderSemanticModelStatus(details) {
 // ============================================================
 // Rebind profile management
 // ============================================================
+// Saved profiles are untrusted data: every field is coerced to plain text and every
+// mapping row gets a fresh internal ID. Saved row IDs are ignored.
+const REBIND_MAPPING_TYPES = ['Workspace', 'Dataflow', 'Dataset'];
+
+function newMappingRow(type, fromId, toId) {
+  return { id: nextMappingRowId++, type: type || 'Workspace', fromId: fromId || '', toId: toId || '' };
+}
+
+function normalizeMappingType(value) {
+  const text = String(value == null ? '' : value).toLowerCase();
+  return REBIND_MAPPING_TYPES.find(function(t) { return t.toLowerCase() === text; }) || 'Workspace';
+}
+
+function normalizeMappingRows(rows) {
+  const list = Array.isArray(rows) ? rows : (rows && typeof rows === 'object' ? [rows] : []);
+  return list.filter(function(r) { return r && typeof r === 'object'; }).map(function(r) {
+    return newMappingRow(normalizeMappingType(r.type),
+      r.fromId == null ? '' : String(r.fromId), r.toId == null ? '' : String(r.toId));
+  });
+}
+
+function normalizeRebindProfile(p) {
+  if (!p || typeof p !== 'object' || typeof p.name !== 'string' || !p.name.trim()) return null;
+  return {
+    name: p.name.trim(),
+    reportPath: p.reportPath == null ? '' : String(p.reportPath),
+    mappings: normalizeMappingRows(p.mappings).map(function(r) { return { type: r.type, fromId: r.fromId, toId: r.toId }; })
+  };
+}
+
 async function loadRebindProfiles() {
+  rebindProfilesLoadError = '';
   try {
     const resp = await fetch(API + '/api/rebind-profiles');
-    rebindProfiles = await resp.json();
-    if (!Array.isArray(rebindProfiles)) rebindProfiles = [];
-    renderRebindProfileList();
-  } catch(e) { rebindProfiles = []; renderRebindProfileList(); }
+    const data = await resp.json();
+    if (!resp.ok || !Array.isArray(data)) {
+      rebindProfiles = [];
+      rebindProfilesLoadError = (data && data.error) || 'Saved Rebind profiles could not be loaded.';
+    } else {
+      const seen = {};
+      rebindProfiles = data.map(normalizeRebindProfile).filter(function(p) {
+        if (!p || seen[p.name]) return false;
+        seen[p.name] = true;
+        return true;
+      });
+    }
+  } catch(e) {
+    rebindProfiles = [];
+    rebindProfilesLoadError = 'Saved Rebind profiles could not be loaded: ' + e.message;
+  }
+  renderRebindProfileList();
 }
 
 function renderRebindProfileList() {
   const list = document.getElementById('rebindProfileList');
   const info = document.getElementById('rebindInfo');
+  if (rebindProfilesLoadError) {
+    list.innerHTML = '<div class="list-empty">' + escHtml(rebindProfilesLoadError) +
+      '<br>Saving profiles is disabled so the saved file is not overwritten.</div>';
+    if (info && currentTab === 'rebind') info.style.display = 'none';
+    return;
+  }
   if (rebindProfiles.length === 0) {
     list.innerHTML = '<div class="list-empty">No saved rebind profiles yet.<br>Fill in the form and click <strong>Save Profile</strong>.</div>';
     if (info && currentTab === 'rebind') info.style.display = '';
@@ -2183,10 +2239,9 @@ function selectRebindProfile(name) {
   if (!p) return;
   document.getElementById('rebindProfileName').value = p.name || '';
   document.getElementById('reportPath').value = p.reportPath || '';
-  mappings = p.mappings || [];
+  mappings = normalizeMappingRows(p.mappings);
   if (mappings.length === 0) { addMapping(); addMapping(); }
   localStorage.setItem('rebind-path', p.reportPath || '');
-  localStorage.setItem('rebind-mappings', JSON.stringify(mappings));
   persistMappings();
   renderMappingList();
   updateRebindButtons();
@@ -2195,6 +2250,7 @@ function selectRebindProfile(name) {
 }
 
 async function saveRebindProfile() {
+  if (rebindProfilesLoadError) { alert(rebindProfilesLoadError + '\nSaving is disabled so the saved file is not overwritten.'); return; }
   const nameInput = document.getElementById('rebindProfileName');
   let name = nameInput.value.trim();
   if (!name) {
@@ -2217,12 +2273,17 @@ async function saveRebindProfile() {
     if (!confirm('No mappings have valid GUIDs on both sides. Save anyway? Invalid mappings will be excluded from Scan.')) return;
   }
 
-  const p = { name: name, reportPath: reportPath, mappings: allNonEmpty };
-  const idx = rebindProfiles.findIndex(function(x) { return x.name === name; });
-  if (idx >= 0) rebindProfiles[idx] = p; else rebindProfiles.push(p);
+  const p = {
+    name: name,
+    reportPath: reportPath,
+    mappings: allNonEmpty.map(function(m) { return { type: m.type, fromId: m.fromId || '', toId: m.toId || '' }; })
+  };
+  const next = rebindProfiles.slice();
+  const idx = next.findIndex(function(x) { return x.name === name; });
+  if (idx >= 0) next[idx] = p; else next.push(p);
+  if (!(await saveRebindProfilesToDisk(next))) return;
   selectedRebindId = name;
   localStorage.setItem('rebind-selected', name);
-  await saveRebindProfilesToDisk();
   document.getElementById('btnDeleteRebind').disabled = false;
   renderRebindProfileList();
 }
@@ -2231,7 +2292,7 @@ function openNewRebindProfile() {
   invalidateRebindScan();
   document.getElementById('rebindProfileName').value = '';
   document.getElementById('reportPath').value = '';
-  mappings = [{ id: Date.now(), type: 'Workspace', fromId: '', toId: '' }];
+  mappings = [newMappingRow()];
   selectedRebindId = -1;
   localStorage.removeItem('rebind-selected');
   localStorage.removeItem('rebind-path');
@@ -2246,28 +2307,47 @@ function openNewRebindProfile() {
 
 async function deleteRebindProfile() {
   if (!selectedRebindId) return;
+  if (rebindProfilesLoadError) { alert(rebindProfilesLoadError + '\nSaving is disabled so the saved file is not overwritten.'); return; }
   if (!confirm('Delete rebind profile "' + selectedRebindId + '"?')) return;
+  const deletedName = selectedRebindId;
+  const next = rebindProfiles.filter(function(p) { return p.name !== deletedName; });
+  if (!(await saveRebindProfilesToDisk(next))) return;
   invalidateRebindScan();
-  rebindProfiles = rebindProfiles.filter(function(p) { return p.name !== selectedRebindId; });
   selectedRebindId = null;
   document.getElementById('rebindProfileName').value = '';
   document.getElementById('reportPath').value = '';
-  mappings = [{ id: Date.now(), type: 'Workspace', fromId: '', toId: '' }];
+  mappings = [newMappingRow()];
   localStorage.removeItem('rebind-selected');
   localStorage.removeItem('rebind-path');
   persistMappings(); renderMappingList(); updateRebindButtons();
   document.getElementById('btnDeleteRebind').disabled = true;
-  await saveRebindProfilesToDisk();
   renderRebindProfileList();
 }
 
-async function saveRebindProfilesToDisk() {
-  await fetch(API + '/api/rebind-profiles', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(rebindProfiles)
-  });
+// Sends the complete list. The page keeps its previous list unless the server
+// confirms the save, so a rejected save never hides profiles that are still on disk.
+async function saveRebindProfilesToDisk(nextProfiles) {
+  let data = null;
+  try {
+    const resp = await fetch(API + '/api/rebind-profiles', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(nextProfiles)
+    });
+    try { data = await resp.json(); } catch (e) { data = null; }
+    if (!resp.ok || !data || data.ok !== true) {
+      alert((data && data.error) || ('Profiles were not saved (HTTP ' + resp.status + ').'));
+      renderRebindProfileList();
+      return false;
+    }
+  } catch (e) {
+    alert('Profiles were not saved: ' + e.message);
+    renderRebindProfileList();
+    return false;
+  }
+  rebindProfiles = nextProfiles;
   renderRebindProfileList();
+  return true;
 }
 
 // ============================================================
@@ -2645,8 +2725,7 @@ function stopPolling() {
 // ============================================================
 function addMapping() {
   invalidateRebindScan();
-  const id = Date.now();
-  mappings.push({ id: id, type: 'Workspace', fromId: '', toId: '' });
+  mappings.push(newMappingRow());
   persistMappings();
   renderMappingList();
   updateRebindButtons();
@@ -2661,27 +2740,64 @@ function removeMapping(id) {
   updateRebindButtons();
 }
 
-function renderMappingList() {
-  const container = document.getElementById('mappingList');
-  container.innerHTML = mappings.map(function(m, i) {
-    const fromCls = m.fromId ? (isValidGuid(m.fromId) ? 'valid' : 'invalid') : '';
-    const toCls = m.toId ? (isValidGuid(m.toId) ? 'valid' : 'invalid') : '';
-    return '<div class="mapping-row">' +
-      '<div class="form-group"><label>Type</label><select onchange="updateMappingType(' + m.id + ',this.value)">' +
-      '<option value="Workspace"' + (m.type === 'Workspace' ? ' selected' : '') + '>Workspace</option>' +
-      '<option value="Dataflow"' + (m.type === 'Dataflow' ? ' selected' : '') + '>Dataflow</option>' +
-      '<option value="Dataset"' + (m.type === 'Dataset' ? ' selected' : '') + '>Dataset</option>' +
-      '</select></div>' +
-      '<div class="form-group"><label>Old GUID</label><input type="text" id="from_' + m.id + '" class="' + fromCls + '" value="' + escHtml(m.fromId || '') + '" placeholder="Old GUID" oninput="updateMappingGuid(' + m.id + ',\'from\',this.value)"></div>' +
-      '<button class="btn-row-swap" onclick="swapMapping(' + m.id + ')" title="Swap old and new GUID" aria-label="Swap old and new GUID">⇅</button>' +
-      '<div class="form-group"><label>New GUID</label><input type="text" id="to_' + m.id + '" class="' + toCls + '" value="' + escHtml(m.toId || '') + '" placeholder="New GUID" oninput="updateMappingGuid(' + m.id + ',\'to\',this.value)"></div>' +
-      (mappings.length > 1 ? '<button class="btn-row-remove" onclick="removeMapping(' + m.id + ')" title="Remove">&#x2715;</button>' : '<div></div>') +
-      '</div>';
-  }).join('');
+function guidClass(value) {
+  const text = String(value || '').trim();
+  return text ? (isValidGuid(text) ? 'valid' : 'invalid') : '';
 }
 
-function swapMapping(id) {
-  const m = mappings.find(function(x) { return x.id === id; });
+function makeElement(tag, props) {
+  const el = document.createElement(tag);
+  Object.keys(props || {}).forEach(function(key) {
+    if (key === 'attrs') Object.keys(props.attrs).forEach(function(name) { el.setAttribute(name, props.attrs[name]); });
+    else el[key] = props[key];
+  });
+  return el;
+}
+
+// Rows are built as elements and wired with listeners that close over the row object,
+// so no saved text is ever parsed as markup or as a handler.
+function renderMappingList() {
+  const container = document.getElementById('mappingList');
+  container.innerHTML = '';
+  mappings.forEach(function(m) {
+    const row = makeElement('div', { className: 'mapping-row' });
+
+    const typeGroup = makeElement('div', { className: 'form-group' });
+    typeGroup.appendChild(makeElement('label', { textContent: 'Type' }));
+    const select = makeElement('select');
+    REBIND_MAPPING_TYPES.forEach(function(t) {
+      select.appendChild(makeElement('option', { value: t, textContent: t, selected: m.type === t }));
+    });
+    select.value = m.type;
+    select.addEventListener('change', function() { updateMappingType(m, select.value); });
+    typeGroup.appendChild(select);
+    row.appendChild(typeGroup);
+
+    const guidInput = function(field, label) {
+      const group = makeElement('div', { className: 'form-group' });
+      group.appendChild(makeElement('label', { textContent: label }));
+      const input = makeElement('input', { type: 'text', className: guidClass(m[field + 'Id']), placeholder: label, value: m[field + 'Id'] || '' });
+      input.addEventListener('input', function() { updateMappingGuid(m, field, input.value, input); });
+      group.appendChild(input);
+      return group;
+    };
+    row.appendChild(guidInput('from', 'Old GUID'));
+    const swap = makeElement('button', { className: 'btn-row-swap', type: 'button', title: 'Swap old and new GUID', textContent: '⇅', attrs: { 'aria-label': 'Swap old and new GUID' } });
+    swap.addEventListener('click', function() { swapMapping(m); });
+    row.appendChild(swap);
+    row.appendChild(guidInput('to', 'New GUID'));
+    if (mappings.length > 1) {
+      const remove = makeElement('button', { className: 'btn-row-remove', type: 'button', title: 'Remove', textContent: '✕', attrs: { 'aria-label': 'Remove mapping' } });
+      remove.addEventListener('click', function() { removeMapping(m.id); });
+      row.appendChild(remove);
+    } else {
+      row.appendChild(makeElement('div'));
+    }
+    container.appendChild(row);
+  });
+}
+
+function swapMapping(m) {
   if (!m) return;
   invalidateRebindScan();
   const tmp = m.fromId;
@@ -2691,25 +2807,18 @@ function swapMapping(id) {
   renderMappingList();
 }
 
-function updateMappingType(id, type) {
+function updateMappingType(m, type) {
   invalidateRebindScan();
-  const m = mappings.find(function(x) { return x.id === id; });
-  if (m) { m.type = type; persistMappings(); }
+  if (m) { m.type = normalizeMappingType(type); persistMappings(); }
 }
 
-function updateMappingGuid(id, field, value) {
+function updateMappingGuid(m, field, value, input) {
   invalidateRebindScan();
-  const m = mappings.find(function(x) { return x.id === id; });
   if (m) { m[field + 'Id'] = value; persistMappings(); }
-  // Apply validation coloring
-  const el = document.getElementById(field + '_' + id);
-  if (el) {
-    el.classList.remove('valid', 'invalid');
-    if (value.trim() && !isValidGuid(value.trim())) {
-      el.classList.add('invalid');
-    } else if (value.trim() && isValidGuid(value.trim())) {
-      el.classList.add('valid');
-    }
+  if (input) {
+    input.classList.remove('valid', 'invalid');
+    const cls = guidClass(value);
+    if (cls) input.classList.add(cls);
   }
   updateRebindButtons();
 }
@@ -2721,7 +2830,8 @@ function getValidMappings() {
 }
 
 function persistMappings() {
-  localStorage.setItem('rebind-mappings', JSON.stringify(mappings));
+  const rows = mappings.map(function(m) { return { type: m.type, fromId: m.fromId || '', toId: m.toId || '' }; });
+  localStorage.setItem('rebind-mappings', JSON.stringify(rows));
 }
 
 function isValidGuid(s) {
@@ -2746,8 +2856,27 @@ function updateRebindButtons() {
   document.getElementById('btnApply').disabled = rebindBusy || !scanComplete;
 }
 
+// Server-side invalidation of a reviewed Scan. Resolves to { ok, invalidated, error }.
+async function cancelRebindDecision(operationId) {
+  try {
+    const resp = await fetch(API + '/api/rebind/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ OperationId: operationId || '' })
+    });
+    let data = null;
+    try { data = await resp.json(); } catch (e) { data = null; }
+    if (resp.ok && data && data.ok === true && data.invalidated === true) return { ok: true, invalidated: true, error: '' };
+    return { ok: false, invalidated: false, error: (data && data.error) || ('HTTP ' + resp.status) };
+  } catch (e) {
+    return { ok: false, invalidated: false, error: e.message };
+  }
+}
+
 function invalidateRebindScan() {
   if (rebindBusy) return;
+  // An edit after Scan also withdraws the reviewed decision on the server.
+  if (scanOperationId) { const reviewed = scanOperationId; scanOperationId = ''; cancelRebindDecision(reviewed); }
   scanComplete = false;
   scanResults = null;
   const applyButton = document.getElementById('btnApply');
@@ -2766,6 +2895,8 @@ async function startScan() {
   rebindBusy = true;
   scanComplete = false;
   scanResults = null;
+  scanOperationId = '';
+  rebindOperationId = '';
   hideRebindSummary();
   updateRebindButtons();
   setStatus('Scanning...', 'running');
@@ -2792,6 +2923,7 @@ async function startScan() {
       showRebindFailure('Scan could not start', data.error || 'Unknown error');
       return;
     }
+    rebindOperationId = data.operationId || '';
     startRebindPolling('scan');
   } catch(e) {
     addLog('Connection error: ' + e.message, 'error');
@@ -2807,7 +2939,8 @@ async function startScan() {
 // Rebind - Apply (Phase 2+3, no confirmation modal)
 // ============================================================
 async function startApply() {
-  if (rebindBusy || !scanComplete) return;
+  if (rebindBusy || !scanComplete || !scanOperationId) return;
+  const reviewedScan = scanOperationId;
   rebindBusy = true;
   hideRebindSummary();
   updateRebindButtons();
@@ -2826,7 +2959,8 @@ async function startApply() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ReportPath: reportPath,
-        Mappings: validMappings.map(m => ({ Type: m.type, OldGuid: m.fromId.trim(), NewGuid: m.toId.trim() }))
+        Mappings: validMappings.map(m => ({ Type: m.type, OldGuid: m.fromId.trim(), NewGuid: m.toId.trim() })),
+        ScanOperationId: reviewedScan
       })
     });
     const data = await resp.json();
@@ -2836,10 +2970,13 @@ async function startApply() {
       updateRebindDot('dotReplace', 'failed');
       rebindBusy = false;
       scanComplete = false;
+      scanOperationId = '';
       updateRebindButtons();
       showRebindFailure('Rebind was not applied', data.error || 'Unknown error');
       return;
     }
+    scanOperationId = '';
+    rebindOperationId = data.operationId || '';
     startRebindPolling('apply');
   } catch(e) {
     addLog('Connection error: ' + e.message, 'error');
@@ -2847,6 +2984,7 @@ async function startApply() {
     updateRebindDot('dotReplace', 'failed');
     rebindBusy = false;
     scanComplete = false;
+    scanOperationId = '';
     updateRebindButtons();
     showRebindFailure('Rebind was not applied', e.message);
   }
@@ -2868,7 +3006,20 @@ function stopRebindPolling() {
 async function pollRebindStatus(expectedPhase) {
   try {
     const resp = await fetch(API + '/api/rebind/status');
+    if (!resp.ok) return;  // unreadable status: keep polling, never guess a result
     const state = await resp.json();
+    // Only the operation this page started may drive the display.
+    if (rebindOperationId && state.operationId !== rebindOperationId) {
+      if (state.running || !state.operationId) return;
+      stopRebindPolling();
+      rebindBusy = false;
+      scanComplete = false;
+      scanOperationId = '';
+      updateRebindButtons();
+      setStatus('Failed', 'failed');
+      showRebindFailure('Another Rebind operation replaced this one', 'The status now belongs to a different Scan or Apply. Nothing from that operation is shown here. Run Scan again.');
+      return;
+    }
 
     // Render logs - always to Rebind container (polling continues even if Refresh tab active)
     if (state.logs && state.logs.length > 0) {
@@ -2904,7 +3055,8 @@ async function pollRebindStatus(expectedPhase) {
         rebindBusy = false;
         scanResults = state.scanResults;
         const totalHits = getScanTotalHits(scanResults);
-        scanComplete = totalHits > 0;
+        scanComplete = totalHits > 0 && arrayOf(scanResults && scanResults.unreadableFiles).length === 0;
+        scanOperationId = scanComplete ? (state.operationId || '') : '';
         updateRebindButtons();
         setStatus('Scan complete', 'done');
         showScanSummary(scanResults);
@@ -2928,6 +3080,7 @@ async function pollRebindStatus(expectedPhase) {
         setStatus('Done', 'done');
         rebindBusy = false;
         scanComplete = false;
+        scanOperationId = '';
         updateRebindButtons();
         showApplySummary(state.applyResults, true);
         stopRebindPolling();
@@ -2936,6 +3089,7 @@ async function pollRebindStatus(expectedPhase) {
         setStatus('Failed', 'failed');
         rebindBusy = false;
         scanComplete = false;
+        scanOperationId = '';
         updateRebindButtons();
         if (state.applyResults) showApplySummary(state.applyResults, false, state.error);
         else showRebindFailure(expectedPhase === 'apply' ? 'Rebind failed' : 'Scan failed', state.error || 'See the technical log for details.');
@@ -2974,7 +3128,9 @@ function showScanSummary(results) {
   const zeroHitMappings = scanMappings.filter(function(mapping) { return !Number(mapping.totalOccurrences); });
   const newGuidWarnings = arrayOf(results && results.newGuidPresence).length;
   const ambiguousWarnings = scanMappings.reduce(function(total, mapping) { return total + arrayOf(mapping.ambiguous).length; }, 0);
-  const warningCount = zeroHitMappings.length + newGuidWarnings + ambiguousWarnings;
+  const unreadableFiles = arrayOf(results && results.unreadableFiles);
+  const canApply = totalHits > 0 && unreadableFiles.length === 0;
+  const warningCount = zeroHitMappings.length + newGuidWarnings + ambiguousWarnings + unreadableFiles.length;
 
   summary.className = 'rebind-summary visible ' + (totalHits === 0 ? 'warning' : (warningCount > 0 ? 'warning' : 'ready'));
   document.getElementById('rebindSummaryIcon').textContent = totalHits === 0 ? '○' : (warningCount > 0 ? '⚠' : '✓');
@@ -2994,14 +3150,19 @@ function showScanSummary(results) {
   if (zeroHitMappings.length) details.push(zeroHitMappings.length + ' mapping(s) have no matches');
   if (newGuidWarnings) details.push(newGuidWarnings + ' new GUID occurrence(s) already exist');
   if (ambiguousWarnings) details.push(ambiguousWarnings + ' match(es) are in an unexpected JSON context');
+  if (unreadableFiles.length) {
+    details.push(unreadableFiles.length + ' file(s) or folder(s) could not be inspected (' +
+      unreadableFiles.slice(0, 3).map(function(f) { return String(f.file || '') + ': ' + String(f.reason || ''); }).join('; ') +
+      (unreadableFiles.length > 3 ? '; ...' : '') + '), so Apply is disabled');
+  }
   document.getElementById('rebindSummaryDetails').textContent = details.length
     ? details.join(' • ') + '. The technical log above has file-level details.'
-    : 'No warnings were found. Apply will still verify that every old GUID was removed.';
+    : 'No warnings were found. Apply changes only the files listed in this Scan and then verifies that every old GUID was removed.';
 
-  document.getElementById('btnSummaryApply').style.display = totalHits > 0 ? '' : 'none';
-  document.getElementById('btnSummaryApply').disabled = totalHits <= 0;
-  document.getElementById('btnSummaryStop').style.display = '';
-  document.getElementById('btnSummaryReset').style.display = totalHits > 0 ? 'none' : '';
+  document.getElementById('btnSummaryApply').style.display = canApply ? '' : 'none';
+  document.getElementById('btnSummaryApply').disabled = !canApply;
+  document.getElementById('btnSummaryStop').style.display = canApply ? '' : 'none';
+  document.getElementById('btnSummaryReset').style.display = canApply ? 'none' : '';
 }
 
 function showApplySummary(results, succeeded, errorMessage) {
@@ -3009,24 +3170,36 @@ function showApplySummary(results, succeeded, errorMessage) {
   const filesChanged = arrayOf(results && results.filesChanged).length;
   const replacements = Number(results && results.totalReplacements) || 0;
   const mappingCount = arrayOf(results && results.mappings).length;
-  const remainingByGuid = (results && results.verification && results.verification.oldGuidsRemaining) || {};
+  const verification = (results && results.verification) || {};
+  const remainingByGuid = verification.oldGuidsRemaining || {};
   const remaining = Object.keys(remainingByGuid).reduce(function(total, guid) { return total + arrayOf(remainingByGuid[guid]).length; }, 0);
+  const problems = arrayOf(results && results.problems).concat(arrayOf(verification.problems));
+  const verified = succeeded && results && results.ok === true && verification.ok === true;
 
-  summary.className = 'rebind-summary visible ' + (succeeded ? 'success' : 'failed');
-  document.getElementById('rebindSummaryIcon').textContent = succeeded ? '✓' : '✕';
-  document.getElementById('rebindSummaryTitle').textContent = succeeded ? 'Rebind completed and verified' : 'Rebind needs attention';
-  document.getElementById('rebindSummaryMessage').textContent = succeeded
-    ? 'The requested replacements were written and no old GUIDs remain in the target files.'
-    : (errorMessage || 'Verification found old GUIDs that remain. Review the technical log before trying again.');
+  summary.className = 'rebind-summary visible ' + (verified ? 'success' : 'failed');
+  document.getElementById('rebindSummaryIcon').textContent = verified ? '✓' : '✕';
+  document.getElementById('rebindSummaryTitle').textContent = verified ? 'Rebind completed and verified' : 'Rebind needs attention';
+  document.getElementById('rebindSummaryMessage').textContent = verified
+    ? 'The replacements were written to the ' + (Number(verification.reviewedFiles) || 0) + ' reviewed file(s), and no old GUIDs remain in any target file.'
+    : (errorMessage || 'Verification did not pass. Review the details below and the technical log before trying again.');
   setSummaryStats([
     { value: filesChanged, label: 'files changed' },
-    { value: replacements, label: 'replacements made' },
+    { value: replacements, label: 'replacements written' },
     { value: mappingCount, label: 'mappings processed' },
-    { value: remaining, label: 'old-GUID locations remaining' }
+    { value: remaining, label: 'old-GUID lines remaining' }
   ]);
-  document.getElementById('rebindSummaryDetails').textContent = succeeded
+  const details = [];
+  if (!verified && filesChanged > 0) details.push('Partial change: ' + filesChanged + ' file(s) were already rewritten (' + arrayOf(results.filesChanged).slice(0, 5).join(', ') + (filesChanged > 5 ? ', ...' : '') + ')');
+  if (!verified && filesChanged === 0) details.push('No file was changed');
+  problems.slice(0, 5).forEach(function(p) { details.push(String(p.file || '') + ': ' + String(p.reason || '')); });
+  if (problems.length > 5) details.push((problems.length - 5) + ' more problem(s) in the technical log');
+  Object.keys(remainingByGuid).forEach(function(guid) {
+    arrayOf(remainingByGuid[guid]).slice(0, 5).forEach(function(loc) { details.push('Old GUID ' + guid.slice(0, 8) + '... remains in ' + String(loc.file || '') + ' line ' + String(loc.line || '?')); });
+  });
+  if (remaining > 0) details.push('All ' + remaining + ' remaining line(s) are listed in the technical log');
+  document.getElementById('rebindSummaryDetails').textContent = verified
     ? 'Next step: open the PBIP project in Power BI Desktop and confirm that its connections work as expected.'
-    : 'No automatic retry was attempted. Correct the issue shown in the log, then run a fresh Scan.';
+    : details.join(' • ') + '. No automatic retry was attempted. Correct the issue, then run a fresh Scan.';
   document.getElementById('btnSummaryApply').style.display = 'none';
   document.getElementById('btnSummaryStop').style.display = 'none';
   document.getElementById('btnSummaryReset').style.display = '';
@@ -3046,11 +3219,26 @@ function showRebindFailure(title, message) {
 }
 
 async function declineRebind() {
-  try { await fetch(API + '/api/rebind/cancel', { method: 'POST' }); } catch (e) { }
+  const reviewed = scanOperationId;
+  // Apply stays disabled here whatever the server answers.
   scanComplete = false;
   scanResults = null;
+  scanOperationId = '';
   updateRebindButtons();
+  const result = await cancelRebindDecision(reviewed);
   const summary = document.getElementById('rebindSummary');
+  if (!result.ok) {
+    summary.className = 'rebind-summary visible failed';
+    document.getElementById('rebindSummaryIcon').textContent = '✕';
+    document.getElementById('rebindSummaryTitle').textContent = 'Stop was not confirmed';
+    document.getElementById('rebindSummaryMessage').textContent = 'The server did not confirm that the Scan decision was cleared: ' + result.error + '. Nothing was changed, but run a new Scan before any Apply.';
+    document.getElementById('rebindSummaryDetails').textContent = 'Apply is disabled in this window. If another Rebind is running, wait for it to finish.';
+    document.getElementById('btnSummaryApply').style.display = 'none';
+    document.getElementById('btnSummaryStop').style.display = 'none';
+    document.getElementById('btnSummaryReset').style.display = '';
+    setStatus('Stop not confirmed', 'failed');
+    return;
+  }
   summary.className = 'rebind-summary visible warning';
   document.getElementById('rebindSummaryIcon').textContent = '■';
   document.getElementById('rebindSummaryTitle').textContent = 'Stopped - nothing was changed';

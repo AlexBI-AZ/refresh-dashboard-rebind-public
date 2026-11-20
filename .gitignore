@@ -6,6 +6,8 @@ refresh-status.json
 refresh-worker.json
 partition-refresh-status.json
 _rebind-worker.ps1
+rebind.lock
+*.rebind-tmp
 _worker.ps1
 *-worker-errors.log
 
