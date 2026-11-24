@@ -1,0 +1,546 @@
+{
+  "viewport": [
+    1440,
+    900
+  ],
+  "boxes": {
+    "01-first-launch": {
+      ".tab-toggle": [
+        16,
+        73.5,
+        251,
+        59.75
+      ],
+      "#profileList": [
+        0,
+        174,
+        283,
+        629
+      ],
+      "#sidebarActions .primary": [
+        16,
+        816,
+        121.5,
+        36
+      ],
+      ".version-pill": [
+        226.640625,
+        864,
+        42.359375,
+        22
+      ],
+      "#pageTitle": [
+        312,
+        20,
+        236.140625,
+        27.5
+      ],
+      "#authBadge": [
+        1188.25,
+        30.5,
+        116.65625,
+        28
+      ],
+      "#statusBadge": [
+        1312.90625,
+        30.5,
+        61.09375,
+        28
+      ],
+      ".btn-help": [
+        1382,
+        29.5,
+        30,
+        30
+      ],
+      "#btnAuth": [
+        1227.140625,
+        96,
+        173.859375,
+        32
+      ],
+      ".config-pane": [
+        312,
+        153,
+        504.171875,
+        723
+      ],
+      "#btnStart": [
+        1251.875,
+        170,
+        139.109375,
+        38
+      ],
+      "#logsRefresh": [
+        833.171875,
+        225,
+        577.8125,
+        650
+      ]
+    },
+    "02-refresh-profile": {
+      ".profile-card.selected": [
+        12,
+        176,
+        259,
+        82.25
+      ],
+      "#profileName": [
+        337,
+        133.5,
+        454.171875,
+        38
+      ],
+      "#wsPickerInput": [
+        337,
+        254,
+        454.171875,
+        38
+      ],
+      "#semanticModelList": [
+        337,
+        397.5,
+        454.171875,
+        54.25
+      ],
+      "#modelPickerInput": [
+        337,
+        459.75,
+        454.171875,
+        38
+      ],
+      "#dfList": [
+        337,
+        603.25,
+        454.171875,
+        174.75
+      ],
+      "#dfPickerInput": [
+        337,
+        786,
+        454.171875,
+        38
+      ],
+      "#modelOnly": [
+        337,
+        833,
+        16,
+        16
+      ],
+      "#notifyEmails": [
+        337,
+        957.1875,
+        454.171875,
+        38
+      ],
+      "#emailDryRun": [
+        337,
+        1004.1875,
+        16,
+        16
+      ],
+      "#refreshAdvanced > summary": [
+        338,
+        1041.03125,
+        452.171875,
+        39.5
+      ],
+      "#formRefresh .form-footer .btn-save": [
+        681.203125,
+        1116.53125,
+        109.96875,
+        38
+      ],
+      "#btnStart": [
+        1251.875,
+        102,
+        139.109375,
+        38
+      ],
+      "#authBadge": [
+        1132.84375,
+        30.5,
+        172.0625,
+        28
+      ]
+    },
+    "02b-refresh-profile-end": {
+      "#modelOnly": [
+        337,
+        531,
+        16,
+        16
+      ],
+      "#notifyEmails": [
+        337,
+        655.1875,
+        454.171875,
+        38
+      ],
+      "#emailDryRun": [
+        337,
+        702.1875,
+        16,
+        16
+      ],
+      "#refreshAdvanced > summary": [
+        338,
+        739.03125,
+        452.171875,
+        39.5
+      ],
+      "#formRefresh .form-footer .btn-save": [
+        681.203125,
+        814.53125,
+        109.96875,
+        38
+      ]
+    },
+    "03-model-picker": {
+      "#modelPickerInput": [
+        337,
+        459.75,
+        454.171875,
+        38
+      ],
+      "#modelPickerList .picker-group": [
+        342,
+        506.75,
+        444.171875,
+        28.5
+      ],
+      "#modelPickerList .picker-option.disabled": [
+        342,
+        535.25,
+        444.171875,
+        53.25
+      ]
+    },
+    "04-new-profile": {
+      "#modalName": [
+        525,
+        424.25,
+        390,
+        38
+      ],
+      "#modalNew .btn-start": [
+        837.34375,
+        506.25,
+        77.65625,
+        38
+      ],
+      "#modalNew .btn-row .btn-save": [
+        750.984375,
+        506.25,
+        78.359375,
+        38
+      ]
+    },
+    "05-refresh-running": {
+      "#progressRow": [
+        853.171875,
+        111.25,
+        388.703125,
+        19.5
+      ],
+      "#dotDataflow": [
+        853.171875,
+        113,
+        16,
+        16
+      ],
+      "#dotDataset": [
+        1117.203125,
+        113,
+        16,
+        16
+      ],
+      "#semanticStatusList": [
+        833.171875,
+        157,
+        577.8125,
+        48.5
+      ],
+      "#statusBadge": [
+        1286.234375,
+        30.5,
+        87.765625,
+        28
+      ],
+      "#logsRefresh": [
+        833.171875,
+        205.5,
+        577.8125,
+        669.5
+      ]
+    },
+    "06-refresh-done": {
+      "#progressRow": [
+        853.171875,
+        111.25,
+        388.703125,
+        19.5
+      ],
+      "#semanticStatusList": [
+        833.171875,
+        157,
+        577.8125,
+        48.5
+      ],
+      "#statusBadge": [
+        1303.625,
+        30.5,
+        70.375,
+        28
+      ],
+      "#logsRefresh .log-entry:last-child": [
+        853.171875,
+        740.25,
+        537.8125,
+        44.5
+      ]
+    },
+    "07-partition": {
+      "#pillPartitionRefresh": [
+        101.328125,
+        76.5,
+        80.328125,
+        53.75
+      ],
+      "#pwsPickerInput": [
+        337,
+        215,
+        219.078125,
+        38
+      ],
+      "#pmodelPickerInput": [
+        572.078125,
+        215,
+        219.09375,
+        38
+      ],
+      "#partitionTableName": [
+        337,
+        296.5,
+        454.171875,
+        38
+      ],
+      "#partitionNames": [
+        337,
+        378,
+        454.171875,
+        112
+      ],
+      "#partitionAdvanced > summary": [
+        338,
+        533,
+        452.171875,
+        39.5
+      ],
+      "#btnStartPartitionRefresh": [
+        853.171875,
+        102,
+        195.046875,
+        38
+      ],
+      "#controlsPartitionRefresh .btn-save": [
+        1058.21875,
+        102,
+        131.46875,
+        38
+      ],
+      "#partitionRefreshState": [
+        833.171875,
+        157,
+        577.8125,
+        256.5
+      ],
+      "#logsPartitionRefresh": [
+        833.171875,
+        413.5,
+        577.8125,
+        461.5
+      ]
+    },
+    "08-rebind-form": {
+      "#pillRebind": [
+        183.65625,
+        76.5,
+        80.34375,
+        53.75
+      ],
+      "#rebindProfileList .profile-card": [
+        12,
+        176,
+        259,
+        80.75
+      ],
+      "#rebindProfileName": [
+        337,
+        133.5,
+        454.171875,
+        38
+      ],
+      "#reportPath": [
+        337,
+        215,
+        454.171875,
+        38
+      ],
+      "#mappingList .mapping-row select": [
+        436,
+        349.5,
+        150,
+        38
+      ],
+      "#mappingList .mapping-row .form-group:nth-child(2) input": [
+        436,
+        393.5,
+        306.171875,
+        38
+      ],
+      "#mappingList .btn-row-swap": [
+        748.171875,
+        417.5,
+        34,
+        34
+      ],
+      "#mappingList .mapping-row .form-group:nth-child(4) input": [
+        436,
+        437.5,
+        306.171875,
+        38
+      ],
+      "#mappingList .btn-row-remove": [
+        748.171875,
+        351.5,
+        34,
+        34
+      ],
+      ".btn-add-mapping": [
+        327,
+        652.5,
+        122.75,
+        32
+      ],
+      "#formRebind .form-footer .btn-save": [
+        681.203125,
+        719.5,
+        109.96875,
+        38
+      ],
+      "#controlsRebind .pipeline": [
+        853.171875,
+        111.25,
+        377.453125,
+        19.5
+      ],
+      "#btnScan": [
+        1240.625,
+        102,
+        66.625,
+        38
+      ],
+      "#btnApply": [
+        1317.25,
+        102,
+        73.734375,
+        38
+      ]
+    },
+    "09-rebind-scan": {
+      "#controlsRebind .pipeline": [
+        853.171875,
+        111.25,
+        377.453125,
+        19.5
+      ],
+      "#logsRebind": [
+        833.171875,
+        157,
+        577.8125,
+        240
+      ],
+      "#rebindLogResizeHandle": [
+        833.171875,
+        397,
+        577.8125,
+        12
+      ],
+      "#rebindSummaryTitle": [
+        916.171875,
+        436,
+        455.8125,
+        22.5
+      ],
+      "#rebindSummaryStats": [
+        872.171875,
+        514.78125,
+        499.8125,
+        82.375
+      ],
+      "#rebindSummaryDetails": [
+        872.171875,
+        609.15625,
+        499.8125,
+        40.28125
+      ],
+      "#btnSummaryApply": [
+        872.171875,
+        663.4375,
+        150.640625,
+        34
+      ],
+      "#btnSummaryStop": [
+        1030.8125,
+        663.4375,
+        125.921875,
+        34
+      ],
+      "#btnApply": [
+        1317.25,
+        102,
+        73.734375,
+        38
+      ]
+    },
+    "10-rebind-apply": {
+      "#controlsRebind .pipeline": [
+        853.171875,
+        111.25,
+        377.453125,
+        19.5
+      ],
+      "#logsRebind": [
+        833.171875,
+        157,
+        577.8125,
+        240
+      ],
+      "#rebindSummaryTitle": [
+        916.171875,
+        436,
+        455.8125,
+        22.5
+      ],
+      "#rebindSummaryStats": [
+        872.171875,
+        514.78125,
+        499.8125,
+        82.375
+      ],
+      "#rebindSummaryDetails": [
+        872.171875,
+        609.15625,
+        499.8125,
+        40.28125
+      ],
+      "#btnSummaryReset": [
+        872.171875,
+        663.4375,
+        132.625,
+        34
+      ]
+    }
+  }
+}

@@ -30,6 +30,11 @@ if (Test-Path -LiteralPath (Join-Path $projectRoot "logs")) {
 $sourceFiles = Get-ChildItem -LiteralPath $projectRoot -Recurse -Force -File |
     Where-Object { $_.FullName -notmatch '[\\/]\.git[\\/]' }
 
+# The text scans below skip binary files (the manual's PDF and screenshots): compressed
+# bytes produce false hits for the ID and thumbprint patterns.
+$binaryExtensions = @(".pdf", ".png", ".ico", ".jpg", ".jpeg", ".gif", ".zip")
+$textFiles = @($sourceFiles | Where-Object { $binaryExtensions -notcontains $_.Extension.ToLowerInvariant() })
+
 # Private notes, backups, certificates, and validation configs that name real reports.
 foreach ($file in $sourceFiles) {
     $relative = $file.FullName.Substring($projectRoot.Length).TrimStart('\', '/')
@@ -51,7 +56,7 @@ $forbiddenPatterns = [ordered]@{
 
 $findings = @()
 foreach ($pattern in $forbiddenPatterns.GetEnumerator()) {
-    foreach ($file in $sourceFiles) {
+    foreach ($file in $textFiles) {
         $text = [System.IO.File]::ReadAllText($file.FullName)
         if ($text -match $pattern.Value) {
             $findings += "$($pattern.Key): $($file.Name)"
@@ -63,7 +68,7 @@ foreach ($pattern in $forbiddenPatterns.GetEnumerator()) {
 $emailPattern = '(?i)\b[A-Z0-9._%+-]+@([A-Z0-9-]+(?:\.[A-Z0-9-]+)+)\b'
 $exampleDomains = '(?i)^(example\.(com|org|net|invalid)|company\.com|contoso\.com)$'
 $emailFiles = @(
-    foreach ($file in $sourceFiles) {
+    foreach ($file in $textFiles) {
         $text = [System.IO.File]::ReadAllText($file.FullName)
         foreach ($match in [regex]::Matches($text, $emailPattern)) {
             if ($match.Groups[1].Value -match $exampleDomains) { continue }
@@ -84,7 +89,7 @@ $publicIds = @(
 $guidPattern = '(?i)\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b'
 
 $idFiles = @(
-    foreach ($file in $sourceFiles) {
+    foreach ($file in $textFiles) {
         $text = [System.IO.File]::ReadAllText($file.FullName)
         foreach ($match in [regex]::Matches($text, $guidPattern)) {
             $id = $match.Value.ToLowerInvariant()
