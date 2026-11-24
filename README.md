@@ -138,7 +138,7 @@ URL не сохраняется в профиле и не должен попа�
 
 #### Настройка Power Automate flow
 
-1. Создайте cloud flow с trigger **When an HTTP request is received**.
+1. Создайте cloud flow с trigger **When an HTTP request is received**. В поле **Who can trigger the flow?** выберите **Any user in my tenant** (рекомендуется, см. «Кто может вызвать flow» ниже) или **Anyone**.
 2. Вставьте JSON schema ниже.
 3. Добавьте **Compose** с expression `join(triggerBody()?['recipients'], ';')`.
 4. Добавьте Outlook action **Send an email (V2)**:
@@ -175,6 +175,26 @@ Request schema:
 ```
 
 Фактический POST содержит ровно эти три поля. Если список получателей пуст, email-шаг пропускается без сообщения. Ошибка flow записывается как WARNING и показывается в интерфейсе, но не меняет результат Refresh.
+
+#### Кто может вызвать flow
+
+Настройка trigger **Who can trigger the flow?** определяет, как flow проверяет вызов. `refresh-email.ps1` поддерживает все три варианта:
+
+| Who can trigger the flow? | Как панель вызывает flow | Кто может отправить письмо через flow |
+|---|---|---|
+| **Any user in my tenant** | POST на URL без ключа, с заголовком `Authorization: Bearer` и токеном Power Automate (audience `https://service.flow.microsoft.com/`) | Только вошедший пользователь или приложение вашего tenant |
+| **Specific users in my tenant** | Так же, как выше | Только перечисленные пользователи и приложения. При входе по сертификату в список нужно добавить само приложение (его service principal) |
+| **Anyone** | POST на URL как есть, без токена | Любой, у кого есть URL: ключ `sig` в URL и есть пароль |
+
+Как это работает:
+
+- Токен Power Automate получается тем же входом, что и обновление: при входе по коду устройства (device code) он берется из того же кэша MSAL без нового окна входа, при входе по сертификату запрашивается app-only токен того же приложения. Токен запрашивается только тогда, когда flow его требует, хранится только в памяти и не пишется в логи и файлы.
+- URL без параметра `sig` сразу отправляется с токеном. URL с `sig` отправляется как есть. Если flow отвечает 401 или 403 (например, trigger переключили на **Any user in my tenant**, а в `setup.bat` остался старый URL), запрос повторяется один раз с токеном и без ключевых параметров `sp`, `sv`, `sig`: ключ и токен в одном вызове flow отклоняет. При 401 и 403 flow не запускается, поэтому письмо не уходит дважды.
+- Токен отправляется только по HTTPS и только на адреса Power Automate (`*.logic.azure.com`, `*.api.powerplatform.com`). Для другого адреса письмо завершается ошибкой, токен не запрашивается.
+- Так же отправляют письмо Claude-скилл `powerbi-chained-refresh` и проверенный запуск (`validation\Invoke-ValidatedRefresh.ps1`): они используют тот же `refresh-email.ps1` и тот же вход.
+- Если tenant не разрешает этому входу получить токен Power Automate без согласия администратора, письмо завершается ошибкой с объяснением (результат Refresh не меняется). Тогда оставьте **Anyone** и ограничьте flow: проверка домена получателей, ограничение числа получателей, **Schema Validation** в настройках trigger.
+
+После смены настройки trigger сохраните flow, скопируйте URL заново и запустите `setup.bat` с ним. Если в новом URL остался ключ `sig`, панель все равно отправит письмо: первая попытка будет отклонена, вторая уйдет с токеном.
 
 #### Безопасная проверка
 
@@ -291,7 +311,7 @@ Rebind рекурсивно проверяет **все** `.tmdl` и `.json` ф�
 6. Перед запуском снимает состояние каждой модели для проверки (`validation\validation.ps1`: конфиг отчета или универсальные проверки)
 7. После успешного завершения всех dataflow запускает все семантические модели. Если модель в этот момент уже обновляется по другому запросу (например, его запустил кто-то другой, пока шли dataflow), runner ждет окончания этого обновления и только потом запускает свое, чтобы модель обновилась после всех dataflow. Запрос, отклоненный службой из-за параллельного обновления, повторяется так же, не более 3 раз. В ошибке сохраняется текст ответа службы, а не только «(400) Bad Request»
 8. Каждые 30 секунд проверяет каждую модель до отдельного конечного результата, затем снимает состояние моделей снова и сравнивает его с исходным
-9. Строит итоговое письмо в `validation\validation.ps1` (`New-ValidationEmailContent`) и при необходимости отправляет его в Power Automate flow через `refresh-email.ps1`. Снимки и сравнение каждой модели лежат в папке запуска как `validation-<n>-before.json`, `validation-<n>-after.json` и `validation-<n>-compare.json`
+9. Строит итоговое письмо в `validation\validation.ps1` (`New-ValidationEmailContent`) и при необходимости отправляет его в Power Automate flow через `refresh-email.ps1` (если flow принимает только вошедших пользователей, с токеном Power Automate того же входа). Снимки и сравнение каждой модели лежат в папке запуска как `validation-<n>-before.json`, `validation-<n>-after.json` и `validation-<n>-compare.json`
 10. Прогресс записывается в `refresh-status.json`, который читается фронтендом. Журнал и `summary.json` каждого запуска лежат в `%LOCALAPPDATA%\PowerBIChainedRefresh\runs\`, ошибки запуска runner в `logs\refresh-worker-errors.log`
 
 ### Rebind - Scan
@@ -338,7 +358,7 @@ Rebind рекурсивно проверяет **все** `.tmdl` и `.json` ф�
 | `runtime\Invoke-RefreshRun.ps1` | Общий runner обновления (вкладка Refresh и Claude-скилл) |
 | `runtime\refresh-engine.ps1`, `runtime\refresh-core.ps1` | Логика обновления, статусы, блокировки |
 | `validation\` | Проверки до и после обновления и итоговое письмо (`validation.ps1`), универсальные проверки (`universal-checks.json`), конфиги отчетов (`reports\`); описание в `validation\README.md` |
-| `refresh-email.ps1` | Отправка готового письма POST-запросом в Power Automate flow |
+| `refresh-email.ps1` | Отправка готового письма POST-запросом в Power Automate flow; для flow, который принимает только вошедших пользователей, с токеном Power Automate |
 | `logs/` | Папка с логами ошибок worker-процессов и refresh-логом |
 
 ---
@@ -373,7 +393,7 @@ $script:RefreshBudgetHours = 11
 
 ## Секреты и публикация
 
-URL flow Power Automate в `REFRESH_EMAIL_WEBHOOK_URL` работает как пароль: любой, у кого он есть, может вызвать flow. Храните его только в пользовательской переменной среды (ее задает `setup.bat`). Не добавляйте его в код, профили, README, issues или письма. Если URL раскрыт, сразу пересоздайте trigger URL в Power Automate и запустите `setup.bat` с новым URL.
+URL flow Power Automate в `REFRESH_EMAIL_WEBHOOK_URL` при настройке trigger **Anyone** работает как пароль: любой, у кого он есть, может вызвать flow. При **Any user in my tenant** или **Specific users in my tenant** одного URL недостаточно, нужен вход в ваш tenant, но URL все равно не публикуйте. Храните его только в пользовательской переменной среды (ее задает `setup.bat`). Не добавляйте его в код, профили, README, issues или письма. Если URL раскрыт, сразу пересоздайте trigger URL в Power Automate и запустите `setup.bat` с новым URL.
 
 Локальные профили, пути к PBIP-проектам, ID рабочих областей, dataset и dataflow, адреса получателей, логи и статусы исключены через `.gitignore`. Каждый пользователь создает свои профили в интерфейсе; они хранятся рядом с приложением. Перед публикацией копии запустите `release-check.ps1` (он есть в публичной копии) и проверьте `git status`. Подробности в `SECURITY.md` публичной копии.
 
@@ -413,6 +433,9 @@ URL flow Power Automate в `REFRESH_EMAIL_WEBHOOK_URL` работает как �
 | Статус `Unknown` у dataflow или модели | Статус не удалось прочитать около 10 минут. Обновление могло завершиться: проверьте историю обновлений в Power BI. Модель после такого dataflow не запускается |
 | Email warning: webhook not configured | Запустите `setup.bat` и вставьте URL flow, затем перезапустите панель; либо включите Dry run |
 | Refresh успешен, email завершился ошибкой | Результат Refresh сохранен. Проверьте URL trigger и историю запусков flow; ошибка письма намеренно не меняет результат обновления |
+| Email: `The flow refused the signed-in call (HTTP 401/403)` | Flow не принял вход. Проверьте **Who can trigger the flow?**: при **Specific users in my tenant** в списке должен быть пользователь, который вошел в панель, или приложение сертификата |
+| Email: `a Power Automate token could not be obtained` | Вход по коду устройства: войдите заново на вкладке Refresh. Если не помогло, tenant не выдает этому входу токен Power Automate без согласия администратора: переключите trigger на **Anyone**. Вход по сертификату: приложению может понадобиться разрешение на Power Automate или исключение в политике tenant |
+| Email: `URL is not an HTTPS Power Automate address` | Flow требует вход, а URL в `REFRESH_EMAIL_WEBHOOK_URL` не похож на адрес Power Automate, поэтому токен не отправлен. Скопируйте URL trigger заново и запустите `setup.bat` |
 | Rebind: Scan не запускается | Проверьте консоль сервера и убедитесь, что выбрана папка PBIP с `.pbip`, `.Report` или `.SemanticModel` |
 | Rebind: кнопка Apply неактивна | Выполните Scan и используйте «Continue with Apply» в резюме. Если путь или GUID изменены после Scan, сканирование нужно повторить |
 | Rebind: ошибка про chained mappings | New GUID одного маппинга совпадает с Old GUID другого. Разделите замену на два отдельных запуска |

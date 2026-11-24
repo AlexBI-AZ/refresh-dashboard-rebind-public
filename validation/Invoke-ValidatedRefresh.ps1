@@ -294,8 +294,12 @@ try {
                 } else {
                     . $emailModulePath
                     try {
-                        Send-RefreshEmail -WebhookUrl $webhookUrl -Recipients $recipientList -Subject $content.Subject -HtmlBody $content.HtmlBody
+                        $sent = Send-RefreshEmail -WebhookUrl $webhookUrl -Recipients $recipientList -Subject $content.Subject -HtmlBody $content.HtmlBody -GetAccessToken {
+                            if ($null -eq $script:authContext) { $script:authContext = New-PowerBiAuthContext }
+                            Get-RefreshFlowAccessToken -Context $script:authContext
+                        }
                         $emailStatus = "Sent"
+                        if ($sent -and $sent.SignedIn) { Write-RunLog "The flow only accepts signed-in callers; the email was sent with a Power Automate token." }
                         Write-RunLog "Email submitted for $($recipientList.Count) recipient(s)."
                     } catch {
                         $emailStatus = "Failed"

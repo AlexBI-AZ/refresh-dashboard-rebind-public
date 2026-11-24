@@ -27,8 +27,9 @@ $realEmailModule = Join-Path $PSScriptRoot "refresh-email.ps1"
 [System.IO.File]::WriteAllText($fakeEmailModule, @"
 . '$realEmailModule'
 function Send-RefreshEmail {
-    param([string]`$WebhookUrl, [string[]]`$Recipients, [string]`$Subject, [string]`$HtmlBody)
-    `$global:RunnerTestSent.Add([pscustomobject]@{ Recipients = `$Recipients; Subject = `$Subject; HtmlBody = `$HtmlBody })
+    param([string]`$WebhookUrl, [string[]]`$Recipients, [string]`$Subject, [string]`$HtmlBody, [scriptblock]`$GetAccessToken)
+    `$global:RunnerTestSent.Add([pscustomobject]@{ Recipients = `$Recipients; Subject = `$Subject; HtmlBody = `$HtmlBody; HasTokenSource = (`$null -ne `$GetAccessToken) })
+    return [pscustomobject]@{ SignedIn = `$false }
 }
 "@)
 
@@ -285,6 +286,7 @@ try {
     $logEntry = @($run.Status.logs)[0]
     Assert ((@($logEntry.PSObject.Properties.Name) -join ",") -eq ($RefreshLogEntryFields -join ",")) "Log entries carry time and text"
     Assert ($run.Status.emailStatus -eq "Sent" -and $global:RunnerTestSent.Count -eq 1) "One email is sent"
+    Assert $global:RunnerTestSent[0].HasTokenSource "The runner offers a Power Automate sign-in for flows that require one"
     Assert ($global:RunnerTestSent[0].Subject -match "Sales Report: refresh OK, \d+/\d+ checks passed") "The validated email names the report and the checks: $($global:RunnerTestSent[0].Subject)"
     # Universal validation: no report config matches "Sales TEST", so rows per table and
     # the model structure are compared before and after.

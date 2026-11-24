@@ -9,11 +9,18 @@ formats with fictional values.
 
 ## Email flow URL
 
-The Power Automate URL used by `REFRESH_EMAIL_WEBHOOK_URL` is a bearer secret:
-anyone who obtains it may be able to invoke the flow. `setup.bat` asks for it with
-hidden input and stores it only as a user environment variable; never commit it,
-put it in a file, or paste it into an issue. Rotate the trigger URL immediately if it
-is exposed, then run `setup.bat` again with the new URL.
+With the trigger setting "Who can trigger the flow?" on **Anyone**, the Power Automate
+URL used by `REFRESH_EMAIL_WEBHOOK_URL` is a bearer secret: anyone who obtains it may be
+able to invoke the flow. With **Any user in my tenant** or **Specific users in my
+tenant**, the flow also requires a Microsoft Entra token from your tenant, which
+`refresh-email.ps1` obtains from the refresh's own sign-in, holds only in memory and
+sends only over HTTPS to Power Automate hosts (`*.logic.azure.com`,
+`*.api.powerplatform.com`). Prefer a restricted setting when your tenant allows it.
+
+In both cases keep the URL private. `setup.bat` asks for it with hidden input and
+stores it only as a user environment variable; never commit it, put it in a file, or
+paste it into an issue. Rotate the trigger URL immediately if it is exposed, then run
+`setup.bat` again with the new URL.
 
 ## Sign-in
 

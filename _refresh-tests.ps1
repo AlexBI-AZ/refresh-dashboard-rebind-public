@@ -245,4 +245,113 @@ Assert ($html -notmatch "modelOnly[^\n]*localStorage|ModelOnly:") "Model only is
 Assert (([regex]::Matches($html, "getElementById\('modelOnly'\)\.checked = false")).Count -ge 2) "Model only is cleared when another profile is selected or the form is reset"
 Assert ($html -match "\(state\.dataflowDetails \|\| \[\]\)\.length === 0 && \(state\.semanticModelDetails \|\| \[\]\)\.length > 0") "The dataflow dot is marked skipped from the status itself"
 
+# Notification flow sign-in (refresh-email.ps1). A trigger URL with a sig key ("Anyone")
+# is sent as it is; a URL without one ("Any user in my tenant" / "Specific users") is sent
+# with a Power Automate token; a keyed call the flow refuses with 401/403 is sent once
+# more with a token and without the key. A token goes only to an HTTPS Power Automate
+# host. Nothing here signs in or calls the service: Invoke-RestMethod and the MSAL calls
+# are replaced.
+. (Join-Path $PSScriptRoot "refresh-email.ps1")
+if (-not ("RefreshEmailTests.HttpError" -as [type])) {
+    Add-Type -TypeDefinition @"
+namespace RefreshEmailTests {
+    public class FakeResponse { public int StatusCode; public FakeResponse(int code) { StatusCode = code; } }
+    public class HttpError : System.Exception {
+        public FakeResponse Response;
+        public HttpError(int code) : base("The remote server returned an error: (" + code + ").") { Response = new FakeResponse(code); }
+    }
+}
+"@
+}
+# Fictional trigger URLs, assembled from parts so release-check.ps1's trigger-URL rule
+# (which guards against real ones) does not flag them.
+$flowPath = "/workflows/0/triggers/manual/paths/" + "invoke"
+$keyedUrl = "https://prod-00.westeurope.logic.azure.com:443" + $flowPath + "?api-version=2016-06-01&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=TESTKEY"
+$signedInUrl = "https://example.00.environment.api.powerplatform.com:443/powerautomate/automations/direct" + $flowPath + "?api-version=1"
+Assert (Test-RefreshFlowUrlHasKey $keyedUrl) "A URL with sig is an Anyone trigger"
+Assert (-not (Test-RefreshFlowUrlHasKey $signedInUrl)) "A URL without sig needs a signed-in caller"
+foreach ($trusted in @($keyedUrl, $signedInUrl)) { Assert (Test-RefreshFlowTrustedHost $trusted) "Power Automate hosts may receive a token: $trusted" }
+foreach ($untrusted in @("http://prod-00.westeurope.logic.azure.com/x", "https://example.invalid/hook", "https://logic.azure.com/x", "https://evillogic.azure.com/x", "https://prod-00.logic.azure.com.example.com/x", "not a url")) {
+    Assert (-not (Test-RefreshFlowTrustedHost $untrusted)) "No token may go to $untrusted"
+}
+$unkeyed = Get-RefreshFlowUrlWithoutKey $keyedUrl
+Assert ($unkeyed -eq ("https://prod-00.westeurope.logic.azure.com" + $flowPath + "?api-version=2016-06-01")) "A signed-in call drops sp, sv and sig and keeps the path and api-version: $unkeyed"
+Assert ((Get-RefreshFlowUrlWithoutKey ($keyedUrl.Replace("sig=", "SIG="))) -notmatch "(?i)sig=") "Key parameters are dropped whatever their case"
+Assert ((Get-RefreshFlowUrlWithoutKey $signedInUrl) -match "/powerautomate/automations/direct/workflows/0/triggers/manual/paths/invoke\?api-version=1$") "A URL without a key keeps its path and query"
+
+$global:FlowCalls = New-Object System.Collections.Generic.List[object]
+$global:FlowAnswers = New-Object System.Collections.Generic.Queue[int]
+$global:TokenRequests = 0
+function Invoke-RestMethod {
+    param([string]$Method, [string]$Uri, [hashtable]$Headers, [string]$ContentType, [byte[]]$Body, [int]$TimeoutSec, $ErrorAction)
+    $global:FlowCalls.Add([pscustomobject]@{ Uri = $Uri; Authorization = [string]$Headers["Authorization"]; Body = [System.Text.Encoding]::UTF8.GetString($Body) })
+    $answer = if ($global:FlowAnswers.Count) { $global:FlowAnswers.Dequeue() } else { 200 }
+    if ($answer -ne 200) { throw (New-Object RefreshEmailTests.HttpError $answer) }
+}
+$tokenSource = { $global:TokenRequests++; "TEST-FLOW-TOKEN" }
+function Reset-Flow([int[]]$Answers = @()) {
+    $global:FlowCalls.Clear(); $global:FlowAnswers.Clear(); $global:TokenRequests = 0
+    foreach ($a in $Answers) { $global:FlowAnswers.Enqueue($a) }
+}
+function Send-TestEmail([string]$Url, [scriptblock]$Source) {
+    return Send-RefreshEmail -WebhookUrl $Url -Recipients @("a@example.com", "b@example.com") -Subject "S" -HtmlBody "<p>B</p>" -GetAccessToken $Source
+}
+
+Reset-Flow
+$sent = Send-TestEmail $keyedUrl $tokenSource
+Assert ($global:FlowCalls.Count -eq 1 -and $global:FlowCalls[0].Authorization -eq "" -and $global:TokenRequests -eq 0 -and -not $sent.SignedIn) "An Anyone flow gets one call without a token, and no token is requested"
+$payload = $global:FlowCalls[0].Body | ConvertFrom-Json
+Assert ((@($payload.PSObject.Properties.Name) -join ",") -eq "recipients,subject,htmlBody" -and @($payload.recipients).Count -eq 2) "The request body keeps exactly recipients, subject and htmlBody"
+
+Reset-Flow
+$sent = Send-TestEmail $signedInUrl $tokenSource
+Assert ($global:FlowCalls.Count -eq 1 -and $global:FlowCalls[0].Authorization -eq "Bearer TEST-FLOW-TOKEN" -and $global:TokenRequests -eq 1 -and $sent.SignedIn) "A flow without a URL key gets one call with a Power Automate token"
+
+Reset-Flow @(401)
+$sent = Send-TestEmail $keyedUrl $tokenSource
+Assert ($global:FlowCalls.Count -eq 2 -and $global:FlowCalls[0].Authorization -eq "" -and $global:FlowCalls[1].Authorization -eq "Bearer TEST-FLOW-TOKEN" -and $sent.SignedIn) "A keyed call refused with 401 is sent once more with a token"
+Assert ($global:FlowCalls[0].Uri -eq $keyedUrl -and $global:FlowCalls[1].Uri -eq $unkeyed) "The retry carries the token instead of the URL key, never both"
+
+Reset-Flow @(403)
+$failure = ""; try { Send-TestEmail $keyedUrl $null | Out-Null } catch { $failure = $_.Exception.Message }
+Assert ($global:FlowCalls.Count -eq 1 -and $failure -match "\(403\)") "Without a token source a refused keyed call fails as it is"
+
+Reset-Flow @(500)
+$failure = ""; try { Send-TestEmail $keyedUrl $tokenSource | Out-Null } catch { $failure = $_.Exception.Message }
+Assert ($global:FlowCalls.Count -eq 1 -and $global:TokenRequests -eq 0 -and $failure -match "\(500\)") "Other failures are not retried and request no token"
+
+Reset-Flow
+$failure = ""; try { Send-TestEmail "https://example.invalid/hook" $tokenSource | Out-Null } catch { $failure = $_.Exception.Message }
+Assert ($global:FlowCalls.Count -eq 0 -and $global:TokenRequests -eq 0 -and $failure -match "not an HTTPS Power Automate address") "No token is requested or sent for a URL off the Power Automate hosts"
+
+Reset-Flow @(403)
+$failure = ""; try { Send-TestEmail $signedInUrl $tokenSource | Out-Null } catch { $failure = $_.Exception.Message }
+Assert ($global:FlowCalls.Count -eq 1 -and $failure -match "refused the signed-in call \(HTTP 403\)" -and $failure -notmatch "TEST-FLOW-TOKEN") "A refused signed-in call names the trigger setting and never the token"
+
+Reset-Flow
+$failure = ""; try { Send-TestEmail $signedInUrl $null | Out-Null } catch { $failure = $_.Exception.Message }
+Assert ($global:FlowCalls.Count -eq 0 -and $failure -match "no Power Automate sign-in is available") "A flow without a URL key and no sign-in fails before calling"
+
+# The flow token comes from the refresh's own sign-in, for the flow service audience.
+$global:MsalCalls = New-Object System.Collections.Generic.List[object]
+function Get-MsalToken {
+    param($PublicClientApplication, $ConfidentialClientApplication, [string[]]$Scopes, [switch]$Silent, [switch]$ForceRefresh, $ErrorAction)
+    $global:MsalCalls.Add([pscustomobject]@{ Scopes = $Scopes; Silent = [bool]$Silent; Confidential = $null -ne $ConfidentialClientApplication })
+    if ($global:MsalFails) { throw "AADSTS65001: consent required. access_token=SECRETVALUE" }
+    return [pscustomobject]@{ AccessToken = "FLOW-TOKEN" }
+}
+function New-PowerBiClientAssertion { param($Certificate, $ClientId, $Audience) return "ASSERTION" }
+function New-MsalClientApplication { param($ClientId, $TenantId, $ClientAssertion, $ErrorAction) return [pscustomobject]@{ Kind = "confidential" } }
+$global:MsalFails = $false
+$delegated = [pscustomobject]@{ Mode = "delegated"; Client = [pscustomobject]@{ Kind = "public" } }
+Assert ((Get-RefreshFlowAccessToken -Context $delegated) -eq "FLOW-TOKEN") "Device-code sign-in yields a flow token"
+Assert ($global:MsalCalls[0].Silent -and -not $global:MsalCalls[0].Confidential -and (@($global:MsalCalls[0].Scopes) -join "") -eq "https://service.flow.microsoft.com//.default") "Device-code sign-in asks silently for the flow service audience"
+$certificate = [pscustomobject]@{ Mode = "service-principal"; Certificate = $null; ClientId = "c"; TenantId = "t"; TokenEndpoint = "e" }
+Assert ((Get-RefreshFlowAccessToken -Context $certificate) -eq "FLOW-TOKEN") "The certificate app yields a flow token"
+Assert ($global:MsalCalls[1].Confidential -and (@($global:MsalCalls[1].Scopes) -join "") -eq "https://service.flow.microsoft.com//.default") "The certificate app asks for the flow service audience"
+$global:MsalFails = $true
+$failure = ""; try { Get-RefreshFlowAccessToken -Context $delegated | Out-Null } catch { $failure = $_.Exception.Message }
+Assert ($failure -match "Power Automate token could not be obtained \(delegated sign-in\)" -and $failure -match "AADSTS65001" -and $failure -notmatch "SECRETVALUE") "A failed flow sign-in explains itself and hides token-shaped text"
+Remove-Item Function:\Invoke-RestMethod, Function:\Get-MsalToken, Function:\New-PowerBiClientAssertion, Function:\New-MsalClientApplication
+
 Write-Host "Refresh contract tests OK"

@@ -193,6 +193,14 @@ function Throw-RefreshRejectedAuthorization {
     throw "Power BI rejected authorization even after silent renewal. Your Microsoft Entra session may have been revoked by policy, or the account may no longer have access. Sign in again (connect-powerbi-refresh.ps1 or the Control Panel's Authenticate button). If it continues, ask the Power BI administrator to verify the account's workspace access."
 }
 
+function Get-RefreshFlowToken {
+    # A Power Automate token for a notification flow that only accepts signed-in callers
+    # (Get-RefreshFlowAccessToken in refresh-email.ps1). Same identity as the refresh; a
+    # run started with the Control Panel's token builds its sign-in context here.
+    if ($null -eq $script:RefreshAuthContext) { $script:RefreshAuthContext = New-PowerBiAuthContext }
+    return Get-RefreshFlowAccessToken -Context $script:RefreshAuthContext
+}
+
 function Invoke-PowerBiRequest {
     param(
         [ValidateSet("GET", "POST")][string]$Method,
@@ -984,7 +992,8 @@ function Complete-RefreshNotification {
         return [pscustomobject]@{ Status = "Failed"; Warning = $warning }
     }
     try {
-        Send-RefreshEmail -WebhookUrl $webhookUrl -Recipients $Recipients -Subject $content.Subject -HtmlBody $content.HtmlBody
+        $sent = Send-RefreshEmail -WebhookUrl $webhookUrl -Recipients $Recipients -Subject $content.Subject -HtmlBody $content.HtmlBody -GetAccessToken { Get-RefreshFlowToken }
+        if ($sent -and $sent.SignedIn) { Write-RefreshLog "The flow only accepts signed-in callers; the email was sent with a Power Automate token ($($script:RefreshAuthContext.Mode) sign-in)." }
         Write-RefreshLog "Notification email submitted for $(@($Recipients).Count) recipient(s)."
         return [pscustomobject]@{ Status = "Sent"; Warning = "" }
     } catch {
